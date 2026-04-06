@@ -15,6 +15,7 @@ jobs:
 
       - name: Build and Run with Docker
         run: |
+          # Relance du deploy
           # 1. On arrete et on supprime les anciens conteneurs proprement
           docker compose down
 
