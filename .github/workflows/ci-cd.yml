@@ -15,6 +15,8 @@ jobs:
 
       - name: Build and Run with Docker
         run: |
-          # Ici, on lance les commandes directement sur ta VM
+          # 1. On arrete et on supprime les anciens conteneurs proprement
           docker compose down
+
+          # 2. On lance la nouvelle version (build force la mise a jour)
           docker compose up -d --build
