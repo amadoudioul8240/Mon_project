@@ -15,8 +15,12 @@ jobs:
 
       - name: Build and Run with Docker
         run: |
-          # Arrete tout et supprime meme les conteneurs "etrangers" au projet actuel
+          # On arrête le projet actuel
           docker compose down --remove-orphans
 
-          # Relance proprement
+          # PAR SÉCURITÉ : On s'assure que le conteneur parc_db est bien mort
+          # Le "|| true" évite que le script s'arrête si le conteneur n'existe pas déjà
+          docker rm -f parc_db || true
+
+          # On relance proprement
           docker compose up -d --build
