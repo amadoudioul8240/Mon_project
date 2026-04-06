@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Documentation Agent Go - Deploiement et Installation</title>
+  <style>
+    body {
+      font-family: Segoe UI, Arial, sans-serif;
+      line-height: 1.5;
+      color: #0f172a;
+      margin: 28px;
+      max-width: 980px;
+    }
+    h1, h2, h3 {
+      color: #0b3b5e;
+      margin-top: 24px;
+      margin-bottom: 8px;
+    }
+    h1 {
+      font-size: 28px;
+      border-bottom: 2px solid #dbeafe;
+      padding-bottom: 8px;
+    }
+    h2 { font-size: 22px; }
+    h3 { font-size: 18px; }
+    p { margin: 8px 0; }
+    ul, ol { margin-top: 6px; margin-bottom: 10px; }
+    code {
+      background: #f1f5f9;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: Consolas, monospace;
+      font-size: 90%;
+    }
+    pre {
+      background: #0f172a;
+      color: #e2e8f0;
+      padding: 12px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 12px;
+    }
+    .box {
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 12px;
+      margin: 10px 0;
+    }
+    .warn {
+      border-left: 5px solid #f59e0b;
+      background: #fffbeb;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+    .ok {
+      border-left: 5px solid #22c55e;
+      background: #f0fdf4;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0;
+      font-size: 13px;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #e2e8f0; }
+    @media print {
+      body { margin: 12mm; max-width: none; }
+      pre { white-space: pre-wrap; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Documentation complete - Agent Go IT Monitoring</h1>
+  <p><strong>Projet:</strong> It-monutoring</p>
+  <p><strong>Version:</strong> 1.0.0 (source go)</p>
+  <p><strong>Date:</strong> 02/04/2026</p>
+
+  <h2>1. Objectif</h2>
+  <p>Ce document explique le deploiement complet de l agent Go sur postes clients Windows:</p>
+  <ul>
+    <li>Build du binaire</li>
+    <li>Signature optionnelle</li>
+    <li>Installation locale en service Windows</li>
+    <li>Deploiement massif a distance</li>
+    <li>Deploiement via GPO Startup Script</li>
+    <li>Verification, troubleshooting et rollback</li>
+  </ul>
+
+  <h2>2. Arborescence livree</h2>
+  <pre>agent-go/
+  build_agent.ps1
+  make_package.ps1
+  go.mod
+  cmd/it-agent/main.go
+  deploy/
+    config.json
+    install_service.ps1
+    uninstall_service.ps1
+    sign_agent.ps1
+    deploy_bulk.ps1
+    gpo_startup_install.ps1
+    computers-example.txt</pre>
+
+  <h2>3. Prerequis</h2>
+  <h3>3.1 Poste de build</h3>
+  <ul>
+    <li>Windows 10/11 ou Windows Server</li>
+    <li>Go SDK 1.22+</li>
+    <li>PowerShell 5.1+</li>
+    <li>Acces au backend (HTTP/HTTPS)</li>
+  </ul>
+
+  <h3>3.2 Postes clients</h3>
+  <ul>
+    <li>Droits administrateur local pour installer le service</li>
+    <li>Sortie reseau vers backend sur port 8000 ou via reverse proxy 443</li>
+    <li>Execution des scripts PowerShell autorisee (ou bypass process)</li>
+  </ul>
+
+  <h3>3.3 Remoting (si deploiement massif)</h3>
+  <ul>
+    <li>WinRM / PowerShell Remoting actif</li>
+    <li>Acces admin share <code>\\PC\C$</code></li>
+    <li>Compte admin de domaine ou local admin sur cibles</li>
+  </ul>
+
+  <h2>4. Configuration agent</h2>
+  <p>Fichier: <code>agent-go/deploy/config.json</code></p>
+  <pre>{
+  "backend_url": "http://172.20.10.13:8000/assets/scan",
+  "interval_seconds": 300,
+  "agent_version": "1.0.0",
+  "proxy_url": "",
+  "log_path": "C:\\ProgramData\\ITMonitoringAgent\\agent.log"
+}</pre>
+
+  <table>
+    <thead>
+      <tr><th>Cle</th><th>Description</th><th>Exemple</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>backend_url</td><td>Endpoint principal pour assets scan</td><td>http://srv-it:8000/assets/scan</td></tr>
+      <tr><td>interval_seconds</td><td>Frequence de collecte (minimum 30)</td><td>300</td></tr>
+      <tr><td>agent_version</td><td>Version remontee au backend</td><td>1.0.0</td></tr>
+      <tr><td>proxy_url</td><td>Proxy sortant optionnel</td><td>http://proxy.corp:8080</td></tr>
+      <tr><td>log_path</td><td>Chemin log local agent</td><td>C:\ProgramData\ITMonitoringAgent\agent.log</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. Build du binaire</h2>
+  <ol>
+    <li>Ouvrir PowerShell dans <code>agent-go</code></li>
+    <li>Lancer le script de build</li>
+  </ol>
+  <pre>Set-Location D:\projet-dev\It-monutoring\agent-go
+.\build_agent.ps1</pre>
+  <p>Resultat attendu: <code>agent-go/deploy/it-agent.exe</code></p>
+
+  <h2>6. Signature du binaire (optionnel mais recommande)</h2>
+  <p>Script: <code>agent-go/deploy/sign_agent.ps1</code></p>
+  <pre>Set-Location D:\projet-dev\It-monutoring\agent-go\deploy
+$cred = Get-Credential
+.\sign_agent.ps1 -PfxPath "C:\certs\codesign.pfx" -SigningCredential $cred</pre>
+  <div class="warn">
+    Utiliser un certificat de signature de code valide entreprise. Ne pas distribuer de mot de passe PFX en clair.
+  </div>
+
+  <h2>7. Installation locale (poste client)</h2>
+  <ol>
+    <li>Copier le dossier <code>deploy</code> sur le poste client</li>
+    <li>Ouvrir PowerShell en Administrateur</li>
+    <li>Lancer l installation service</li>
+  </ol>
+  <pre>Set-Location C:\Temp\agent-go\deploy
+.\install_service.ps1</pre>
+
+  <h3>Verification service</h3>
+  <pre>Get-Service ITMonitoringGoAgent
+Get-Content C:\ProgramData\ITMonitoringAgent\agent.log -Tail 50</pre>
+
+  <h3>Desinstallation</h3>
+  <pre>.\uninstall_service.ps1</pre>
+
+  <h2>8. Deploiement massif (remote)</h2>
+  <p>Script: <code>agent-go/deploy/deploy_bulk.ps1</code></p>
+  <ol>
+    <li>Renseigner les machines dans <code>computers-example.txt</code> (1 machine par ligne)</li>
+    <li>Lancer le deploiement depuis un poste admin</li>
+  </ol>
+  <pre>Set-Location D:\projet-dev\It-monutoring\agent-go\deploy
+.\deploy_bulk.ps1 `
+  -ComputerListPath .\computers-example.txt `
+  -BackendUrl "http://srv-it:8000/assets/scan" `
+  -SkipOffline</pre>
+
+  <h2>9. Deploiement via GPO (Startup Script)</h2>
+  <h3>9.1 Preparation partage</h3>
+  <ul>
+    <li>Creer un partage central, ex: <code>\\DOMAIN\netlogon\it-agent-go</code></li>
+    <li>Y copier: <code>it-agent.exe</code>, <code>config.json</code>, <code>gpo_startup_install.ps1</code></li>
+  </ul>
+
+  <h3>9.2 Lier script dans GPO</h3>
+  <ol>
+    <li>Group Policy Management</li>
+    <li>Computer Configuration -&gt; Policies -&gt; Windows Settings -&gt; Scripts (Startup)</li>
+    <li>Ajouter <code>gpo_startup_install.ps1</code> avec arguments:</li>
+  </ol>
+  <pre>-SourceSharePath "\\DOMAIN\netlogon\it-agent-go" -BackendUrl "http://srv-it:8000/assets/scan"</pre>
+
+  <h3>9.3 Log GPO</h3>
+  <p>Sur poste client: <code>C:\ProgramData\ITMonitoringAgent\gpo-startup.log</code></p>
+
+  <h2>10. Variables d environnement supportees</h2>
+  <table>
+    <thead>
+      <tr><th>Variable</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>ASSET_BACKEND_URL</td><td>URL backend si config absent</td></tr>
+      <tr><td>ASSET_BACKEND_PROXY</td><td>Proxy sortant HTTP/HTTPS</td></tr>
+      <tr><td>ASSET_AGENT_LOG_PATH</td><td>Chemin log local</td></tr>
+    </tbody>
+  </table>
+
+  <h2>11. Flux envoyes au backend</h2>
+  <ul>
+    <li><code>/assets/scan</code> - inventaire machine + logiciels</li>
+    <li><code>/security/posture</code> - posture securite</li>
+    <li><code>/metrics/resources</code> - metriques CPU/RAM/Disque</li>
+    <li><code>/network/telemetry</code> - ports ouverts + logs reseau</li>
+  </ul>
+  <p>L agent envoie aussi: <code>agent_source=go</code>, <code>agent_version</code>, <code>agent_id</code> pour dual-run.</p>
+
+  <h2>12. Validation post-installation</h2>
+  <ol>
+    <li>Service up:</li>
+  </ol>
+  <pre>Get-Service ITMonitoringGoAgent</pre>
+  <ol start="2">
+    <li>Logs agent:</li>
+  </ol>
+  <pre>Get-Content C:\ProgramData\ITMonitoringAgent\agent.log -Tail 80</pre>
+  <ol start="3">
+    <li>Backend dual-run:</li>
+  </ol>
+  <pre>GET /agents/dual-run/health
+GET /agents/dual-run/compare/{serial_number}</pre>
+
+  <h2>13. Troubleshooting</h2>
+  <h3>13.1 Service ne demarre pas</h3>
+  <ul>
+    <li>Verifier Event Viewer System</li>
+    <li>Verifier presence du binaire dans <code>C:\ProgramData\ITMonitoringAgent</code></li>
+    <li>Verifier droits locaux et AV/EDR</li>
+  </ul>
+
+  <h3>13.2 Pas de remontee backend</h3>
+  <ul>
+    <li>Verifier <code>backend_url</code></li>
+    <li>Verifier route reseau/firewall/proxy</li>
+    <li>Verifier logs backend</li>
+  </ul>
+
+  <h3>13.3 Remoting bulk KO</h3>
+  <ul>
+    <li>Activer WinRM: <code>Enable-PSRemoting -Force</code></li>
+    <li>Verifier pare-feu remoting</li>
+    <li>Tester <code>Invoke-Command</code> manuellement</li>
+  </ul>
+
+  <h2>14. Bonnes pratiques securite</h2>
+  <ul>
+    <li>Signer le binaire avant deploiement massif</li>
+    <li>Utiliser HTTPS/TLS vers backend en production</li>
+    <li>Deployer via compte admin limite et journaliser les actions</li>
+    <li>Conserver un plan rollback (uninstall_service.ps1)</li>
+  </ul>
+
+  <div class="ok">
+    Cette documentation couvre build, installation locale, deploiement massif et GPO pour l agent Go.
+  </div>
+</body>
+</html>

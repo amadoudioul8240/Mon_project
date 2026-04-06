@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Explication du projet IT Monitoring</title>
+    <style>
+      body {
+        font-family: "Segoe UI", Arial, sans-serif;
+        margin: 0;
+        color: #1f2937;
+        background: #f5f7fb;
+      }
+
+      .page {
+        max-width: 900px;
+        margin: 32px auto;
+        background: #ffffff;
+        padding: 48px 56px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+        border-radius: 20px;
+      }
+
+      h1, h2 {
+        color: #0f172a;
+        margin-top: 0;
+      }
+
+      h1 {
+        font-size: 30px;
+        margin-bottom: 8px;
+      }
+
+      h2 {
+        font-size: 20px;
+        margin-top: 28px;
+        margin-bottom: 10px;
+        padding-bottom: 6px;
+        border-bottom: 2px solid #e5e7eb;
+      }
+
+      p, li {
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .meta {
+        color: #64748b;
+        margin-bottom: 24px;
+      }
+
+      .box {
+        background: #eff6ff;
+        border-left: 4px solid #2563eb;
+        padding: 14px 16px;
+        border-radius: 10px;
+      }
+
+      code {
+        background: #f3f4f6;
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-family: Consolas, monospace;
+        font-size: 13px;
+      }
+
+      ul, ol {
+        padding-left: 20px;
+      }
+
+      .footer {
+        margin-top: 32px;
+        font-size: 12px;
+        color: #6b7280;
+        text-align: right;
+      }
+
+      @media print {
+        body {
+          background: #ffffff;
+        }
+
+        .page {
+          box-shadow: none;
+          margin: 0;
+          max-width: none;
+          border-radius: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <h1>Explication du projet IT Monitoring</h1>
+      <div class="meta">Document rédigé en français pour comprendre l’architecture et la logique générale du code.</div>
+
+      <div class="box">
+        <strong>Idée générale</strong><br />
+        Le projet sert à gérer un parc informatique. Il combine une interface web React, une API FastAPI, une base PostgreSQL et un agent local capable de remonter des informations machines.
+      </div>
+
+      <h2>1. Vue d’ensemble</h2>
+      <p>
+        L’application est organisée en trois parties principales. Le frontend React affiche les pages, tableaux et formulaires. Le backend FastAPI reçoit les requêtes HTTP, valide les données et parle à la base PostgreSQL. Enfin, la base stocke les utilisateurs, lieux, équipements et logs de maintenance.
+      </p>
+      <p>
+        Le flux principal est le suivant : le navigateur appelle le frontend, le frontend envoie des requêtes au backend, puis le backend lit ou écrit dans la base de données.
+      </p>
+
+      <h2>2. Backend FastAPI</h2>
+      <p>
+        Le fichier <code>backend/main.py</code> est le point d’entrée principal de l’API. Il crée l’application FastAPI, configure le CORS pour autoriser le frontend local, puis déclare les schémas de données et les routes HTTP.
+      </p>
+      <p>Les routes principales couvrent :</p>
+      <ul>
+        <li>les utilisateurs ;</li>
+        <li>les lieux ;</li>
+        <li>les types de matériel ;</li>
+        <li>les équipements ;</li>
+        <li>les statistiques pour le tableau de bord ;</li>
+        <li>les logs de maintenance.</li>
+      </ul>
+      <p>
+        Quand le frontend demande une liste d’équipements, le backend interroge la base, charge aussi les relations utiles comme le type et le propriétaire, puis renvoie une réponse déjà pratique à afficher.
+      </p>
+
+      <h2>3. Modèles de base de données</h2>
+      <p>
+        Le fichier <code>backend/db_models.py</code> décrit les tables via SQLAlchemy. Il représente les objets métier du projet.
+      </p>
+      <ul>
+        <li><strong>Location</strong> : un lieu physique, par exemple un bureau ou un bâtiment.</li>
+        <li><strong>User</strong> : une personne à qui du matériel peut être affecté.</li>
+        <li><strong>Asset</strong> : un équipement du parc informatique.</li>
+        <li><strong>MaintenanceLog</strong> : une intervention ou un historique de maintenance lié à un équipement.</li>
+      </ul>
+      <p>
+        Ces modèles servent de pont entre le code Python et les tables réelles en base de données.
+      </p>
+
+      <h2>4. Migrations et structure SQL</h2>
+      <p>
+        Le fichier <code>alembic/env.py</code> prépare le contexte de migration Alembic. Il permet d’exécuter les changements de schéma. Le fichier <code>init.sql</code> crée aussi une structure de base et injecte quelques données d’exemple pour démarrer rapidement l’application.
+      </p>
+
+      <h2>5. Frontend React</h2>
+      <p>
+        Le fichier <code>frontend/src/index.js</code> démarre React dans la page HTML. Ensuite, <code>frontend/src/App.js</code> installe le routeur et distribue les différentes pages selon l’URL.
+      </p>
+      <p>
+        La navigation latérale se trouve dans <code>frontend/src/components/Sidebar.js</code>. Elle donne accès aux écrans principaux du projet.
+      </p>
+
+      <h2>6. Tableau de bord</h2>
+      <p>
+        Le composant <code>frontend/src/components/Dashboard.js</code> concentre l’essentiel de la vue générale. Il charge les équipements, les statistiques par type, ouvre les modales d’ajout et de modification, puis gère aussi la suppression d’un équipement avec confirmation.
+      </p>
+      <p>
+        Il affiche également un graphique circulaire de répartition par type pour donner une vision synthétique du parc.
+      </p>
+
+      <h2>7. Inventaire et maintenance</h2>
+      <p>
+        Le composant <code>frontend/src/components/Inventaire.js</code> affiche une autre vue du matériel, orientée consultation de l’historique de maintenance. Lorsqu’un utilisateur clique sur le bouton pour voir les détails, le composant <code>frontend/src/components/MaintenanceLogs.js</code> charge les logs associés à l’équipement sélectionné.
+      </p>
+      <p>
+        Ce composant permet aussi d’ajouter une nouvelle intervention de maintenance puis de recharger la liste pour afficher le résultat immédiatement.
+      </p>
+
+      <h2>8. Création et modification d’un équipement</h2>
+      <p>
+        Les composants <code>AddAssetModal.js</code> et <code>EditAssetModal.js</code> pilotent les formulaires de création et de modification. Ils récupèrent les données de référence nécessaires, comme les utilisateurs, les lieux et les types d’équipement, puis envoient les données saisies au backend.
+      </p>
+
+      <h2>9. Pages d’administration</h2>
+      <p>
+        Les pages <code>UsersPage.js</code> et <code>LocationsPage.js</code> sont des écrans simples d’administration. Elles suivent le même schéma : charger la liste existante, afficher un formulaire, envoyer les nouvelles données au backend, puis rafraîchir l’affichage.
+      </p>
+
+      <h2>10. Gestion des licences</h2>
+      <p>
+        Le composant <code>Logiciels.js</code> fonctionne actuellement comme une maquette. Les données sont statiques dans le code. Le composant calcule simplement si une licence est valide, bientôt expirée ou déjà expirée selon la date d’expiration.
+      </p>
+
+      <h2>11. Agent de collecte local</h2>
+      <p>
+        Le fichier <code>agent_collecte.py</code> est prévu pour tourner sur une machine cliente. Il récupère des informations système comme le nom de la machine, l’OS, l’adresse MAC, le numéro de série, le modèle et les logiciels installés. Ensuite, il envoie ces informations au backend via une requête HTTP.
+      </p>
+      <p>
+        Cet agent sert donc à automatiser une partie de l’inventaire matériel et logiciel.
+      </p>
+
+      <h2>12. Déploiement</h2>
+      <p>
+        Le fichier <code>docker-compose.yml</code> orchestre les services <code>db</code>, <code>backend</code> et <code>frontend</code>. Le script <code>setup.sh</code> automatise la construction des images Docker, le démarrage des conteneurs et l’initialisation SQL de la base.
+      </p>
+      <p>
+        Les fichiers Dockerfile du backend et du frontend expliquent comment construire les images nécessaires au fonctionnement de l’application.
+      </p>
+
+      <h2>13. Point de vigilance</h2>
+      <p>
+        En lisant le projet, on remarque quelques incohérences probables entre certains noms de champs du frontend et ceux du backend, par exemple entre <code>numero_serie</code> et <code>serial_number</code>, ou entre <code>statut</code> et <code>status</code>. Cela n’empêche pas la compréhension globale, mais c’est un point à surveiller si tu veux rendre tout le projet parfaitement cohérent.
+      </p>
+
+      <h2>14. Conclusion</h2>
+      <p>
+        En résumé, ce projet est une application de gestion de parc informatique avec une architecture web classique : une interface React, une API FastAPI, une base PostgreSQL et un agent de collecte local. Le frontend affiche et édite les données, le backend applique la logique métier, et la base conserve l’état durable du parc.
+      </p>
+
+      <div class="footer">Généré le 1 avril 2026</div>
+    </div>
+  </body>
+</html>

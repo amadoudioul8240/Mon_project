@@ -1,0 +1,61 @@
+services:
+  db:
+    # Service PostgreSQL persistant qui stocke les données du parc.
+    image: postgres:15
+    container_name: parc_db
+    restart: always
+    environment:
+      POSTGRES_USER: parc_admin
+      POSTGRES_PASSWORD: parc_password
+      POSTGRES_DB: parc_db
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - parcnet
+
+  backend:
+    # API FastAPI qui dialogue avec la base et expose les routes consommées par le frontend.
+    build: ./backend
+    container_name: parc_backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://parc_admin:parc_password@db:5432/parc_db
+      AD_SERVER: ${AD_SERVER:-}
+      AD_PORT: ${AD_PORT:-636}
+      AD_USE_SSL: ${AD_USE_SSL:-true}
+      AD_BIND_USER: ${AD_BIND_USER:-}
+      AD_BIND_PASSWORD: ${AD_BIND_PASSWORD:-}
+      AD_BASE_DN: ${AD_BASE_DN:-}
+      AD_USERS_DN: ${AD_USERS_DN:-}
+      AD_COMPUTERS_DN: ${AD_COMPUTERS_DN:-}
+      AD_USER_FILTER: ${AD_USER_FILTER:-(&(objectCategory=person)(objectClass=user))}
+      AD_COMPUTER_FILTER: ${AD_COMPUTER_FILTER:-(&(objectCategory=computer)(objectClass=computer))}
+      AD_AUTO_SYNC_ENABLED: ${AD_AUTO_SYNC_ENABLED:-true}
+      AD_AUTO_SYNC_INTERVAL_MINUTES: ${AD_AUTO_SYNC_INTERVAL_MINUTES:-60}
+    depends_on:
+      - db
+    ports:
+      - "8000:8000"
+    networks:
+      - parcnet
+
+  frontend:
+    # Interface React servie en conteneur et reliée à l'API backend.
+    build: ./frontend
+    container_name: parc_frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    networks:
+      - parcnet
+
+volumes:
+  # Volume Docker dédié à la persistance des données PostgreSQL.
+  db_data:
+
+networks:
+  parcnet:
+    # Réseau privé partagé entre les trois services de la stack.
+    driver: bridge

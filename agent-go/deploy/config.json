@@ -1,0 +1,7 @@
+{
+  "backend_url": "http://172.20.10.13:8000/assets/scan",
+  "interval_seconds": 300,
+  "agent_version": "1.0.0",
+  "proxy_url": "",
+  "log_path": "C:\\ProgramData\\ITMonitoringAgent\\agent.log"
+}

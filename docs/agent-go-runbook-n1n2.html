@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Runbook N1/N2 - Agent Go IT Monitoring</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 24px; color: #0f172a; }
+    h1, h2, h3 { color: #0b3b5e; margin: 16px 0 8px; }
+    h1 { font-size: 26px; border-bottom: 2px solid #dbeafe; padding-bottom: 6px; }
+    h2 { font-size: 20px; }
+    h3 { font-size: 16px; }
+    p, li { font-size: 14px; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+    pre { background: #0f172a; color: #e2e8f0; padding: 10px; border-radius: 8px; font-size: 12px; white-space: pre-wrap; }
+    .ok { border-left: 5px solid #22c55e; background: #f0fdf4; padding: 8px 10px; margin: 8px 0; }
+    .warn { border-left: 5px solid #f59e0b; background: #fffbeb; padding: 8px 10px; margin: 8px 0; }
+    .crit { border-left: 5px solid #ef4444; background: #fef2f2; padding: 8px 10px; margin: 8px 0; }
+    table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+    th, td { border: 1px solid #cbd5e1; padding: 8px; font-size: 13px; text-align: left; }
+    th { background: #e2e8f0; }
+  </style>
+</head>
+<body>
+  <h1>Runbook N1/N2 - Agent Go IT Monitoring</h1>
+  <p><strong>Version:</strong> 1.0.0 | <strong>Date:</strong> 02/04/2026</p>
+
+  <h2>1. But</h2>
+  <p>Ce runbook sert a exploiter, verifier et depanner rapidement l agent Go sur postes Windows.</p>
+
+  <h2>2. Verification rapide (N1)</h2>
+  <ol>
+    <li>Service present et demarre:</li>
+  </ol>
+  <pre>Get-Service ITMonitoringGoAgent</pre>
+  <ol start="2">
+    <li>Logs agent:</li>
+  </ol>
+  <pre>Get-Content C:\ProgramData\ITMonitoringAgent\agent.log -Tail 80</pre>
+  <ol start="3">
+    <li>Flux backend (UI):</li>
+  </ol>
+  <pre>Dual-Run Monitoring
+- Etat machine: OK / Partiel / Alerte
+- Dernier PS1 vs Dernier Go</pre>
+
+  <div class="ok"><strong>Etat OK:</strong> service running + logs recents + donnees visibles sous 5 min.</div>
+
+  <h2>3. Incidents standard et actions (N1)</h2>
+  <table>
+    <thead><tr><th>Symptome</th><th>Cause probable</th><th>Action N1</th></tr></thead>
+    <tbody>
+      <tr><td>Service absent</td><td>Installation non executee</td><td>Relancer install_service.ps1 en admin</td></tr>
+      <tr><td>Service stopped</td><td>Crash, binaire bloque, droits</td><td>Start-Service + verifier Event Viewer</td></tr>
+      <tr><td>Pas de remontee</td><td>Backend URL/proxy/firewall</td><td>Verifier config.json + connectivite reseau</td></tr>
+      <tr><td>Partiel/Alerte dual-run</td><td>Un seul agent actif ou stale</td><td>Verifier timestamps, logs et statut agent cible</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. Diagnostics N2</h2>
+  <h3>4.1 Test endpoint backend</h3>
+  <pre>Test-NetConnection srv-it -Port 8000
+Invoke-WebRequest http://srv-it:8000/docs -UseBasicParsing</pre>
+
+  <h3>4.2 Verifier config runtime</h3>
+  <pre>Get-Content C:\ProgramData\ITMonitoringAgent\config.json</pre>
+
+  <h3>4.3 Reinstallation propre</h3>
+  <pre>Set-Location C:\Temp\agent-go\deploy
+.\uninstall_service.ps1
+.\install_service.ps1</pre>
+
+  <h3>4.4 Verification dual-run backend</h3>
+  <pre>GET /agents/dual-run/health?active_minutes=60
+GET /agents/dual-run/compare/{serial_number}</pre>
+
+  <h2>5. Escalade N3/SecOps</h2>
+  <div class="warn">Escalader si: blocage AppLocker/EDR, signature invalide, conflit policy GPO, ou absence remontee globale.</div>
+  <ul>
+    <li>Joindre logs agent (50-200 lignes)</li>
+    <li>Joindre event logs Service Control Manager</li>
+    <li>Joindre statut dual-run de la machine</li>
+  </ul>
+
+  <h2>6. Rollback d urgence</h2>
+  <div class="crit">Si incident majeur, desactiver temporairement l agent Go et revenir au PS1.</div>
+  <pre>.\uninstall_service.ps1
+# puis relancer le flux PS1 selon procedure interne</pre>
+
+  <h2>7. Commandes utiles</h2>
+  <pre>sc.exe query ITMonitoringGoAgent
+Restart-Service ITMonitoringGoAgent
+Get-Content C:\ProgramData\ITMonitoringAgent\gpo-startup.log -Tail 50
+Get-Content C:\ProgramData\ITMonitoringAgent\agent.log -Tail 100</pre>
+</body>
+</html>

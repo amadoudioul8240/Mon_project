@@ -1,0 +1,64 @@
+/* Injection des styles de base normalisés de Tailwind. */
+@tailwind base;
+/* Couche destinée aux composants ou classes utilitaires personnalisés. */
+@tailwind components;
+/* Génération de toutes les classes utilitaires utilisées dans le projet. */
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=DM+Sans:wght@400;500;700&display=swap');
+
+:root {
+	--bg-main: #f2f6f8;
+	--bg-soft: #e8eef4;
+	--ink-strong: #0f172a;
+	--ink-muted: #475569;
+	--brand-700: #0b3b5e;
+	--brand-500: #1f7a8c;
+	--accent-500: #ff7f50;
+	--card-border: #d7e3ee;
+}
+
+body {
+	margin: 0;
+	font-family: 'DM Sans', sans-serif;
+	color: var(--ink-strong);
+	background:
+		radial-gradient(circle at 16% 14%, #d9ecff 0%, transparent 28%),
+		radial-gradient(circle at 88% 12%, #ffe8dc 0%, transparent 24%),
+		linear-gradient(160deg, var(--bg-main) 0%, var(--bg-soft) 100%);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+	font-family: 'Space Grotesk', sans-serif;
+	letter-spacing: -0.015em;
+}
+
+#root {
+	min-height: 100vh;
+}
+
+.glass-panel {
+	backdrop-filter: blur(8px);
+	background-color: rgba(255, 255, 255, 0.74);
+	border: 1px solid var(--card-border);
+}
+
+.fade-up {
+	animation: fade-up 500ms ease-out both;
+}
+
+@keyframes fade-up {
+	from {
+		opacity: 0;
+		transform: translateY(12px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
