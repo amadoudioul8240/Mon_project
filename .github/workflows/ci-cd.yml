@@ -15,12 +15,12 @@ jobs:
 
       - name: Build and Run with Docker
         run: |
-          # On arrête le projet actuel
+          # 1. On arrête le projet proprement
           docker compose down --remove-orphans
 
-          # PAR SÉCURITÉ : On s'assure que le conteneur parc_db est bien mort
-          # Le "|| true" évite que le script s'arrête si le conteneur n'existe pas déjà
-          docker rm -f parc_db || true
+          # 2. NETTOYAGE FORCE : On supprime tous les conteneurs qui pourraient bloquer
+          # On ignore les erreurs si les conteneurs n'existent pas (|| true)
+          docker rm -f parc_db parc_backend parc_frontend || true
 
-          # On relance proprement
+          # 3. On relance tout à neuf
           docker compose up -d --build
