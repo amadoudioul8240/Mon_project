@@ -15,9 +15,8 @@ jobs:
 
       - name: Build and Run with Docker
         run: |
-          # Relance du deploy
-          # 1. On arrete et on supprime les anciens conteneurs proprement
-          docker compose down
+          # Arrete tout et supprime meme les conteneurs "etrangers" au projet actuel
+          docker compose down --remove-orphans
 
-          # 2. On lance la nouvelle version (build force la mise a jour)
+          # Relance proprement
           docker compose up -d --build
