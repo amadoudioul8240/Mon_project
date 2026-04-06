@@ -11,8 +11,8 @@ RUN npm install
 # Copie de tout le code source frontend.
 COPY . .
 
-# Le fichier .env fournit notamment l'URL du backend au moment du build.
-COPY .env .env
+# Le fichier .env est optionnel selon l'environnement de build.
+COPY .env* ./
 
 # Génère la version statique optimisée de l'application.
 RUN npm run build
