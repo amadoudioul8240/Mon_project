@@ -10,7 +10,7 @@ import os
 
 # URL du backend qui reçoit les données collectées. Une variable d'environnement
 # permet de rediriger l'agent sans toucher au code.
-BACKEND_URL = os.environ.get('ASSET_BACKEND_URL', 'http://172.20.10.13:8000/assets/scan')
+BACKEND_URL = os.environ.get('ASSET_BACKEND_URL', 'http://192.168.196.134:8000/assets/scan')
 
 # Structure centrale contenant les informations système qui seront enrichies puis envoyées.
 info = {

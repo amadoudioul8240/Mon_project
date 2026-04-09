@@ -1,5 +1,5 @@
 param(
-    [string]$BackendUrl = $(if ($env:ASSET_BACKEND_URL) { $env:ASSET_BACKEND_URL } else { 'http://172.20.10.13:8000/assets/scan' }),
+    [string]$BackendUrl = $(if ($env:ASSET_BACKEND_URL) { $env:ASSET_BACKEND_URL } else { 'http://192.168.196.134:8000/assets/scan' }),
     [string]$ExportPath = '',
     [switch]$DryRun
 )

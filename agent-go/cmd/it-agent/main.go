@@ -199,7 +199,7 @@ func main() {
 
 func loadConfig() Config {
 	cfg := Config{
-		BackendURL:      envOrDefault("ASSET_BACKEND_URL", "http://172.20.10.13:8000/assets/scan"),
+		BackendURL:      envOrDefault("ASSET_BACKEND_URL", "http://192.168.196.134:8000/assets/scan"),
 		IntervalSeconds: 300,
 		AgentVersion:    "1.0.0",
 		ProxyURL:        strings.TrimSpace(os.Getenv("ASSET_BACKEND_PROXY")),
@@ -221,7 +221,7 @@ func loadConfig() Config {
 		cfg.IntervalSeconds = 30
 	}
 	if strings.TrimSpace(cfg.BackendURL) == "" {
-		cfg.BackendURL = "http://172.20.10.13:8000/assets/scan"
+		cfg.BackendURL = "http://192.168.196.134:8000/assets/scan"
 	}
 	if strings.TrimSpace(cfg.AgentVersion) == "" {
 		cfg.AgentVersion = "1.0.0"
