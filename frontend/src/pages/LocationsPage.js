@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
 // Page simple de gestion des lieux physiques du parc informatique.
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 export default function LocationsPage() {
   // Le formulaire ajoute un lieu, tandis que la liste montre les emplacements existants.

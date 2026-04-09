@@ -1,8 +1,8 @@
+
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
-
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 export default function NetworkPortsLogsPage() {
   const [data, setData] = useState({ generated_at: '', total_hosts: 0, hosts_with_open_ports: 0, items: [] });

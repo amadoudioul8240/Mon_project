@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import MaintenanceLogs from './MaintenanceLogs';
+import { backendUrl } from '../config/api';
 
 export default function Inventaire() {
   // La page d'inventaire garde la liste des équipements et l'identifiant
@@ -9,7 +10,7 @@ export default function Inventaire() {
 
   useEffect(() => {
     // Chargement unique de l'inventaire au montage du composant.
-    fetch('http://localhost:8000/assets')
+    fetch(`${backendUrl}/assets`)
       .then(res => res.json())
       .then(data => setAssets(data));
   }, []);

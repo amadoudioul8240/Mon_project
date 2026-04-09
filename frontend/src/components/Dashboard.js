@@ -3,7 +3,7 @@ import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import AddAssetModal from './AddAssetModal';
 import EditAssetModal from './EditAssetModal';
 
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 // Couleur unique par famille d'équipement (normalisée pour gérer accents/variantes).
 const TYPE_COLORS = {

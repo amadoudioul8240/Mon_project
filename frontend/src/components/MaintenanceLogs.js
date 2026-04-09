@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { backendUrl } from '../config/api';
 
 export default function MaintenanceLogs({ assetId }) {
   // Ce composant encapsule l'historique de maintenance d'un équipement
@@ -17,7 +18,7 @@ export default function MaintenanceLogs({ assetId }) {
   useEffect(() => {
     // À chaque changement d'équipement sélectionné, on recharge ses logs depuis l'API.
     if (assetId) {
-      fetch(`http://localhost:8000/maintenance_logs/${assetId}`)
+      fetch(`${backendUrl}/maintenance_logs/${assetId}`)
         .then(res => res.json())
         .then(data => setLogs(data));
     }
@@ -34,7 +35,7 @@ export default function MaintenanceLogs({ assetId }) {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`http://localhost:8000/maintenance_logs/${assetId}`, {
+      const res = await fetch(`${backendUrl}/maintenance_logs/${assetId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...form, asset_id: assetId })
@@ -43,7 +44,7 @@ export default function MaintenanceLogs({ assetId }) {
       setForm({ maintenance_date: '', description: '', cost: '', performed_by: '' });
       setShowForm(false);
       // Refresh logs
-      const logsRes = await fetch(`http://localhost:8000/maintenance_logs/${assetId}`);
+      const logsRes = await fetch(`${backendUrl}/maintenance_logs/${assetId}`);
       setLogs(await logsRes.json());
     } catch (err) {
       setError("Erreur lors de l'ajout du log.");

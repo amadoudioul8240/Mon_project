@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, PieChart, Pie, Cell, Legend } from 'recharts';
 import html2canvas from 'html2canvas';
 
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 const alertStatuses = ['Nouvelle', 'En cours', 'Résolue', 'Faux positif'];
 const chartPalette = ['#2563eb', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#14b8a6', '#f97316'];

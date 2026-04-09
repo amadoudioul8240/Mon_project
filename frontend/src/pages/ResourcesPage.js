@@ -11,7 +11,7 @@ import {
   Legend,
 } from 'recharts';
 
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 const pct = (used, total) => {
   if (!total || total <= 0 || used === null || used === undefined) return null;

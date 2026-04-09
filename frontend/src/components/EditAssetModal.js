@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 // La modale de modification réutilise la même source backend que l'ajout.
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 // Les statuts autorisés sont alignés sur ceux du backend.
 const statusOptions = [

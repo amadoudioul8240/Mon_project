@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
 // L'URL du backend est centralisée dans une variable d'environnement React.
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 // Les statuts autorisés sont alignés sur ceux du backend.
 const statusOptions = [

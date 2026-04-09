@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
 // Page d'administration dédiée à la gestion des utilisateurs du parc.
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 export default function UsersPage() {
   // On stocke à la fois la liste déjà créée et l'état courant du formulaire d'ajout.

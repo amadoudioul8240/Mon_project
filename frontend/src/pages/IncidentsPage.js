@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 
 // Page de gestion des incidents (création, suivi, modification, suppression).
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 const statusOptions = ['Ouvert', 'En cours', 'Résolu'];
 const priorityOptions = ['Basse', 'Moyenne', 'Haute', 'Critique'];
