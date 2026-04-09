@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import html2canvas from 'html2canvas';
 
-const backendUrl = process.env.REACT_APP_BACKEND_URL;
+import { backendUrl } from '../config/api';
 
 const statusColumns = [
   { key: 'A faire', label: 'A faire', color: 'border-slate-400' },

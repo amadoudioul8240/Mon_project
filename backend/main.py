@@ -19,10 +19,18 @@ from ldap3 import Server, Connection, ALL, SUBTREE, NTLM, SIMPLE
 # pour lire et modifier le parc informatique.
 app = FastAPI()
 
+
+def get_cors_allow_origins() -> List[str]:
+    raw_origins = os.getenv(
+        "CORS_ALLOW_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://192.168.196.134:3000",
+    )
+    return [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
 # Configuration CORS minimale pour autoriser l'application React locale à appeler l'API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # ⚠️ change en prod
+    allow_origins=get_cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
