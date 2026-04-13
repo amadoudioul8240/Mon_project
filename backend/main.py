@@ -2119,42 +2119,61 @@ def _generate_findings_from_posture(posture: EndpointSecurityPosture, db: Sessio
         ~SecurityFinding.title.like("Endpoint non vu depuis%")
     ).delete(synchronize_session=False)
 
-    is_network_probe = posture.serial_number.startswith("NET-") or posture.os == "Network Probe"
+    is_network_probe = posture.serial_number.startswith("NET-") or (posture.os or "").lower() == "network probe"
     target_type = "LAN" if posture.asset_id is None else "Poste client"
     rules = []
 
+    os_family = (posture.os or "").lower()
+
     if not is_network_probe:
-        if not posture.firewall_enabled:
-            rules.append({
-                "title": f"Firewall désactivé sur {posture.hostname}",
-                "description": "Le pare-feu Windows n'est pas activé. Cela expose le poste à des connexions non autorisées.",
-                "severity": "Critique",
-                "recommendation": "Activez immédiatement le pare-feu Windows (Windows Defender Firewall).",
-            })
-
-        if not posture.defender_enabled:
-            rules.append({
-                "title": f"Windows Defender désactivé sur {posture.hostname}",
-                "description": "L'antivirus Windows Defender n'est pas activé.",
-                "severity": "Critique",
-                "recommendation": "Activez Windows Defender Antivirus.",
-            })
-
-        if not posture.realtime_protection_enabled:
-            rules.append({
-                "title": f"Protection temps réel désactivée sur {posture.hostname}",
-                "description": "La protection temps réel de Windows Defender n'est pas active.",
-                "severity": "Élevée",
-                "recommendation": "Activez la protection temps réel dans Windows Defender.",
-            })
-
-        if not posture.bitlocker_enabled:
-            rules.append({
-                "title": f"BitLocker non activé sur {posture.hostname}",
-                "description": "Le chiffrement de disque BitLocker n'est pas configuré.",
-                "severity": "Élevée",
-                "recommendation": "Activez BitLocker pour chiffrer le disque dur.",
-            })
+        if "windows" in os_family:
+            if not posture.firewall_enabled:
+                rules.append({
+                    "title": f"Firewall désactivé sur {posture.hostname}",
+                    "description": "Le pare-feu Windows n'est pas activé. Cela expose le poste à des connexions non autorisées.",
+                    "severity": "Critique",
+                    "recommendation": "Activez immédiatement le pare-feu Windows (Windows Defender Firewall).",
+                })
+            if not posture.defender_enabled:
+                rules.append({
+                    "title": f"Windows Defender désactivé sur {posture.hostname}",
+                    "description": "L'antivirus Windows Defender n'est pas activé.",
+                    "severity": "Critique",
+                    "recommendation": "Activez Windows Defender Antivirus.",
+                })
+            if not posture.realtime_protection_enabled:
+                rules.append({
+                    "title": f"Protection temps réel désactivée sur {posture.hostname}",
+                    "description": "La protection temps réel de Windows Defender n'est pas active.",
+                    "severity": "Élevée",
+                    "recommendation": "Activez la protection temps réel dans Windows Defender.",
+                })
+            if not posture.bitlocker_enabled:
+                rules.append({
+                    "title": f"BitLocker non activé sur {posture.hostname}",
+                    "description": "Le chiffrement de disque BitLocker n'est pas configuré.",
+                    "severity": "Élevée",
+                    "recommendation": "Activez BitLocker pour chiffrer le disque dur.",
+                })
+        elif "linux" in os_family:
+            # Exemple pour Linux (à adapter selon vos collectes)
+            if not getattr(posture, "clamav_enabled", True):
+                rules.append({
+                    "title": f"ClamAV désactivé sur {posture.hostname}",
+                    "description": "L'antivirus ClamAV n'est pas activé.",
+                    "severity": "Élevée",
+                    "recommendation": "Activez ClamAV ou un autre antivirus compatible Linux.",
+                })
+        elif "mac" in os_family:
+            # Exemple pour MacOS (à adapter selon vos collectes)
+            if not getattr(posture, "xprotect_enabled", True):
+                rules.append({
+                    "title": f"XProtect désactivé sur {posture.hostname}",
+                    "description": "L'antivirus XProtect n'est pas activé.",
+                    "severity": "Élevée",
+                    "recommendation": "Activez XProtect ou un autre antivirus compatible Mac.",
+                })
+        # Ajoutez ici Android, Chromebook, etc.
 
         if posture.pending_reboot:
             rules.append({

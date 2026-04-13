@@ -1,3 +1,15 @@
+def clamav_enabled() -> bool:
+    try:
+        # Vérifie si clamd ou clamav-daemon tourne
+        output = run_cmd(["ps", "aux"])
+        if "clamd" in output or "clamav-daemon" in output:
+            return True
+        # Vérifie si clamscan est installé
+        if run_cmd(["which", "clamscan"]):
+            return True
+    except Exception:
+        pass
+    return False
 #!/usr/bin/env python3
 """Linux dedicated IT Monitoring agent.
 
@@ -292,6 +304,7 @@ def build_payloads(backend_url: str) -> Dict[str, Dict[str, Any]]:
         "realtime_protection_enabled": False,
         "bitlocker_enabled": False,
         "pending_reboot": pending_reboot(),
+        "clamav_enabled": clamav_enabled(),
     }
 
     metrics_payload = {
