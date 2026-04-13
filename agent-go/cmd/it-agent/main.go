@@ -106,6 +106,7 @@ type AuthEventItem struct {
 	LogonType string `json:"logon_type,omitempty"`
 	Outcome   string `json:"outcome,omitempty"`
 	Message   string `json:"message,omitempty"`
+	EventType string `json:"event_type,omitempty"`
 }
 
 type AuthEventsPayload struct {
@@ -503,43 +504,46 @@ $events = Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = $ids } -Ma
 $result = @()
 $maxSeen = $last
 foreach ($evt in $events) {
-  if ($evt.RecordId -le $last) { continue }
-  $xml = [xml]$evt.ToXml()
-  $map = @{}
-  foreach ($d in $xml.Event.EventData.Data) {
-    if ($null -ne $d.Name -and $d.Name -ne '') {
-      $map[$d.Name] = [string]$d.'#text'
-    }
-  }
-  $eventId = [int]$evt.Id
-  $outcome = if ($eventId -eq 4624) { 'success' } elseif ($eventId -eq 4625 -or $eventId -eq 4740) { 'failure' } else { 'unknown' }
-  $targetUser = [string]$map['TargetUserName']
-  if ([string]::IsNullOrWhiteSpace($targetUser)) { $targetUser = [string]$map['SubjectUserName'] }
-  $targetDomain = [string]$map['TargetDomainName']
-  if ([string]::IsNullOrWhiteSpace($targetDomain)) { $targetDomain = [string]$map['SubjectDomainName'] }
-  $sourceIp = [string]$map['IpAddress']
-  if ([string]::IsNullOrWhiteSpace($sourceIp) -or $sourceIp -eq '-') { $sourceIp = [string]$map['WorkstationName'] }
-  $logonType = [string]$map['LogonType']
-  $message = [string]$evt.Message
-  if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
+	if ($evt.RecordId -le $last) { continue }
+	$xml = [xml]$evt.ToXml()
+	$map = @{}
+	foreach ($d in $xml.Event.EventData.Data) {
+		if ($null -ne $d.Name -and $d.Name -ne '') {
+			$map[$d.Name] = [string]$d.'#text'
+		}
+	}
+	$eventId = [int]$evt.Id
+	$outcome = if ($eventId -eq 4624) { 'success' } elseif ($eventId -eq 4625 -or $eventId -eq 4740) { 'failure' } else { 'unknown' }
+	$targetUser = [string]$map['TargetUserName']
+	if ([string]::IsNullOrWhiteSpace($targetUser)) { $targetUser = [string]$map['SubjectUserName'] }
+	$targetDomain = [string]$map['TargetDomainName']
+	if ([string]::IsNullOrWhiteSpace($targetDomain)) { $targetDomain = [string]$map['SubjectDomainName'] }
+	$sourceIp = [string]$map['IpAddress']
+	if ([string]::IsNullOrWhiteSpace($sourceIp) -or $sourceIp -eq '-') { $sourceIp = [string]$map['WorkstationName'] }
+	$logonType = [string]$map['LogonType']
+	$message = [string]$evt.Message
+	if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
 
-  $result += [PSCustomObject]@{
-    record_id  = [int]$evt.RecordId
-    event_id   = $eventId
-    timestamp  = $evt.TimeCreated.ToString('o')
-    user_name  = $targetUser
-    domain     = $targetDomain
-    source_ip  = $sourceIp
-    logon_type = $logonType
-    outcome    = $outcome
-    message    = $message
-  }
+	$event_type = if ($outcome -eq 'success') { 'auth.login' } else { 'auth.failure' }
 
-  if ($evt.RecordId -gt $maxSeen) { $maxSeen = [int]$evt.RecordId }
+	$result += [PSCustomObject]@{
+		record_id  = [int]$evt.RecordId
+		event_id   = $eventId
+		timestamp  = $evt.TimeCreated.ToString('o')
+		user_name  = $targetUser
+		domain     = $targetDomain
+		source_ip  = $sourceIp
+		logon_type = $logonType
+		outcome    = $outcome
+		message    = $message
+		event_type = $event_type
+	}
+
+	if ($evt.RecordId -gt $maxSeen) { $maxSeen = [int]$evt.RecordId }
 }
 [PSCustomObject]@{
-  max_record_id = $maxSeen
-  events        = $result
+	max_record_id = $maxSeen
+	events        = $result
 } | ConvertTo-Json -Depth 6 -Compress
 `, lastRecordID, maxEvents)
 

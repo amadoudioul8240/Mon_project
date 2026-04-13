@@ -78,12 +78,79 @@ def get_software():
         pass
     return sw
 
+
 # La liste des logiciels est injectée avant l'envoi du payload au serveur.
 info['software'] = get_software()
 
-# Dernière étape : publication des données collectées vers l'API centrale.
+# --- Ajout collecte et envoi événements d'authentification ---
+import re
+
+def collect_auth_events():
+    events = []
+    if info['os'] == 'Windows':
+        try:
+            output = subprocess.check_output([
+                'wevtutil', 'qe', 'Security', '/q:*[System[(EventID=4624 or EventID=4625 or EventID=4740)]]', '/f:text', '/c:10'
+            ], stderr=subprocess.DEVNULL).decode(errors='ignore')
+            for entry in output.split('\n\n'):
+                if 'Event ID:' in entry:
+                    evt_type = 'auth.unknown'
+                    if 'Event ID: 4624' in entry:
+                        evt_type = 'auth.login'
+                    elif 'Event ID: 4625' in entry:
+                        evt_type = 'auth.login_failed'
+                    elif 'Event ID: 4740' in entry:
+                        evt_type = 'auth.lockout'
+                    user = ''
+                    m = re.search(r'Account Name:\s*(\S+)', entry)
+                    if m:
+                        user = m.group(1)
+                    events.append({
+                        'event_type': evt_type,
+                        'user': user,
+                        'hostname': info['hostname'],
+                        'os': info['os'],
+                    })
+        except Exception:
+            pass
+    elif info['os'] == 'Linux':
+        try:
+            with open('/var/log/auth.log', 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()[-20:]
+            for line in lines:
+                evt_type = None
+                if 'session opened for user' in line:
+                    evt_type = 'auth.login'
+                elif 'authentication failure' in line:
+                    evt_type = 'auth.login_failed'
+                elif 'user locked' in line:
+                    evt_type = 'auth.lockout'
+                if evt_type:
+                    m = re.search(r'user(?:name)?[ =]([\w-]+)', line)
+                    user = m.group(1) if m else ''
+                    events.append({
+                        'event_type': evt_type,
+                        'user': user,
+                        'hostname': info['hostname'],
+                        'os': info['os'],
+                    })
+        except Exception:
+            pass
+    return events
+
+# Envoi inventaire classique
 try:
     resp = requests.post(BACKEND_URL, json=info, timeout=10)
-    print('Envoi réussi:', resp.status_code)
+    print('Envoi inventaire réussi:', resp.status_code)
 except Exception as e:
-    print('Erreur lors de l\'envoi:', e)
+    print('Erreur lors de l\'envoi inventaire:', e)
+
+# Envoi événements d'authentification
+AUTH_EVENTS_URL = os.environ.get('AUTH_EVENTS_URL', 'http://192.168.196.134:8000/siem/auth-events')
+auth_events = collect_auth_events()
+for evt in auth_events:
+    try:
+        resp = requests.post(AUTH_EVENTS_URL, json=evt, timeout=10)
+        print(f"Envoi event {evt['event_type']} pour {evt.get('user','')} :", resp.status_code)
+    except Exception as e:
+        print('Erreur envoi event:', e)

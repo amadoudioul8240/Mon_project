@@ -10,14 +10,14 @@ def clamav_enabled() -> bool:
     except Exception:
         pass
     return False
+
 #!/usr/bin/env python3
+from __future__ import annotations
 """Linux dedicated IT Monitoring agent.
 
 Collects inventory, basic security posture, resource metrics, and network telemetry,
 then sends data to IT Monitoring backend endpoints.
 """
-
-from __future__ import annotations
 
 import argparse
 import json
@@ -345,6 +345,43 @@ def build_payloads(backend_url: str) -> Dict[str, Dict[str, Any]]:
     }
 
 
+
+# --- Ajout collecte et envoi événements d'authentification ---
+import re
+
+def collect_auth_events_linux(limit: int = 20):
+    events = []
+    # Essaye journalctl d'abord
+    journal = run_cmd(["bash", "-lc", f"command -v journalctl >/dev/null 2>&1 && journalctl -n {limit} --no-pager -q"])
+    lines = []
+    if journal:
+        lines = [line for line in journal.splitlines() if line.strip()][:limit]
+    else:
+        auth_log = Path("/var/log/auth.log")
+        if auth_log.exists():
+            try:
+                lines = auth_log.read_text(encoding="utf-8", errors="ignore").splitlines()[-limit:]
+            except Exception:
+                pass
+    for line in lines:
+        evt_type = None
+        if "session opened for user" in line:
+            evt_type = "auth.login"
+        elif "authentication failure" in line:
+            evt_type = "auth.login_failed"
+        elif "user locked" in line:
+            evt_type = "auth.lockout"
+        if evt_type:
+            m = re.search(r'user(?:name)?[ =]([\w-]+)', line)
+            user = m.group(1) if m else ''
+            events.append({
+                "event_type": evt_type,
+                "user": user,
+                "hostname": socket.gethostname(),
+                "os": platform.system(),
+            })
+    return events
+
 def run_cycle(backend_url: str, verbose: bool = False) -> bool:
     all_ok = True
     payloads = build_payloads(backend_url)
@@ -356,6 +393,17 @@ def run_cycle(backend_url: str, verbose: bool = False) -> bool:
             if not ok:
                 print(response)
         all_ok = all_ok and ok
+
+    # Envoi événements d'authentification
+    AUTH_EVENTS_URL = os.getenv("AUTH_EVENTS_URL", "http://192.168.196.134:8000/siem/auth-events")
+    auth_events = collect_auth_events_linux()
+    for evt in auth_events:
+        try:
+            ok, response = post_json(AUTH_EVENTS_URL, evt)
+            if verbose:
+                print(f"[auth_event] {evt['event_type']} pour {evt.get('user','')} : {'OK' if ok else 'ERROR'}")
+        except Exception as e:
+            print('Erreur envoi event:', e)
     return all_ok
 
 
