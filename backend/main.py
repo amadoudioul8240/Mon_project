@@ -1,7 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException, Body, Request
+from fastapi import FastAPI, Depends, HTTPException, Body, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 import json
+import csv
+from io import StringIO
 from datetime import date, datetime, timedelta
 import os
 import re
@@ -12,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, inspect, text
 from sqlalchemy.exc import IntegrityError
-from db_models import Base, engine, SessionLocal, User, Location, Asset, AssetType, MaintenanceLog, Incident, ITProject, AdConfig, SecurityFinding, EndpointSecurityPosture, SecurityPolicyConfig, EndpointResourceMetric, NetworkTelemetry, AgentIngestLog, SiemEvent, SiemAlert
+from db_models import Base, engine, SessionLocal, User, Location, Asset, AssetType, MaintenanceLog, Incident, ITProject, AdConfig, SecurityFinding, EndpointSecurityPosture, SecurityPolicyConfig, EndpointResourceMetric, NetworkTelemetry, AgentIngestLog, SiemEvent, SiemAlert, SecurityJob
 from ldap3 import Server, Connection, ALL, SUBTREE, NTLM, SIMPLE
 
 # API FastAPI principale du projet. Elle expose les routes utilisées par le frontend
@@ -41,6 +43,37 @@ _AD_AUTO_SYNC_STOP = threading.Event()
 _AD_AUTO_SYNC_THREAD: Optional[threading.Thread] = None
 _ENDPOINT_STATUS_STOP = threading.Event()
 _ENDPOINT_STATUS_THREAD: Optional[threading.Thread] = None
+_SECURITY_JOB_STOP = threading.Event()
+_SECURITY_JOB_THREAD: Optional[threading.Thread] = None
+
+SECURITY_JOB_TYPE_CATALOG = {
+    "security_recalculate": {
+        "label": "Recalcul des constats défensifs",
+        "description": "Rejoue les règles de constats automatiques à partir de la posture collectée.",
+        "supports_target_scope": False,
+        "default_parameters": {},
+    },
+    "siem_rules_replay": {
+        "label": "Rejeu des règles SIEM",
+        "description": "Relance la corrélation interne sur les hôtes connus.",
+        "supports_target_scope": False,
+        "default_parameters": {},
+    },
+    "unknown_devices_snapshot": {
+        "label": "Snapshot des appareils inconnus",
+        "description": "Capture les équipements vus sur le réseau mais absents de l'inventaire.",
+        "supports_target_scope": False,
+        "default_parameters": {"active_minutes": 15},
+    },
+    "network_exposure_review": {
+        "label": "Revue d'exposition réseau",
+        "description": "Analyse les ports observés et crée des constats défensifs sur les expositions sensibles.",
+        "supports_target_scope": True,
+        "default_parameters": {"replace_existing": True},
+    },
+}
+
+SECURITY_JOB_VALID_STATUS = ["queued", "running", "completed", "failed", "cancelled"]
 
 
 def seed_database():
@@ -170,16 +203,26 @@ def startup_event():
             conn.execute(text("ALTER TABLE security_policy_config ADD COLUMN endpoint_offline_grace_cycles INTEGER DEFAULT 2"))
         conn.commit()
 
+    security_jobs_tables = inspector.get_table_names()
+    if "security_jobs" in security_jobs_tables:
+        security_job_cols = [c["name"] for c in inspector.get_columns("security_jobs")]
+        with engine.connect() as conn:
+            if "cancel_requested" not in security_job_cols:
+                conn.execute(text("ALTER TABLE security_jobs ADD COLUMN cancel_requested BOOLEAN DEFAULT FALSE"))
+            conn.commit()
+
     seed_database()
     _ensure_ad_config_defaults()
     _start_ad_auto_sync_worker()
     _start_endpoint_status_worker()
+    _start_security_job_worker()
 
 
 @app.on_event("shutdown")
 def shutdown_event():
     _AD_AUTO_SYNC_STOP.set()
     _ENDPOINT_STATUS_STOP.set()
+    _SECURITY_JOB_STOP.set()
 
 def get_db():
     # Dépendance FastAPI : ouvre une session SQLAlchemy pour la requête courante
@@ -413,6 +456,49 @@ class ITProjectResponse(ITProjectBase):
         from_attributes = True
 
 
+IT_PROJECT_VALID_STATUS = ["A faire", "En cours", "Termine"]
+
+
+def _clean_it_project_steps(steps: List[ITProjectBase.ProjectStep]) -> List[Dict[str, str]]:
+    cleaned_steps = []
+    for step in steps:
+        label = (step.label or "").strip()
+        if not label:
+            continue
+        if step.end_date < step.start_date:
+            raise HTTPException(status_code=400, detail=f"Etape '{label}': la date de fin doit etre >= a la date de debut")
+        cleaned_steps.append({
+            "label": label,
+            "start_date": step.start_date.isoformat(),
+            "end_date": step.end_date.isoformat(),
+        })
+    return cleaned_steps
+
+
+def _validate_it_project_payload(payload: ITProjectCreate) -> List[Dict[str, str]]:
+    if payload.status not in IT_PROJECT_VALID_STATUS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Statut invalide: {payload.status}. Valeurs acceptees: {IT_PROJECT_VALID_STATUS}",
+        )
+
+    title = payload.title.strip()
+    description = payload.description.strip()
+    if not title or not description:
+        raise HTTPException(status_code=400, detail="Titre et description sont obligatoires")
+
+    cleaned_steps = _clean_it_project_steps(payload.steps)
+    if payload.due_date and cleaned_steps:
+        latest_step_end = max(step["end_date"] for step in cleaned_steps)
+        if payload.due_date.isoformat() < latest_step_end:
+            raise HTTPException(
+                status_code=400,
+                detail="L'echeance du projet doit etre superieure ou egale a la fin de la derniere etape",
+            )
+
+    return cleaned_steps
+
+
 class ScannedSoftware(BaseModel):
     name: str
     version: Optional[str] = None
@@ -521,6 +607,49 @@ class SecuritySummaryResponse(BaseModel):
     critical_findings: int
     open_findings: int
     monitored_endpoints: int
+
+
+class SecurityJobCatalogItem(BaseModel):
+    job_type: str
+    label: str
+    description: str
+    supports_target_scope: bool
+    default_parameters: Dict[str, Any] = {}
+
+
+class SecurityJobCreate(BaseModel):
+    job_type: str
+    requested_by: Optional[str] = None
+    target_scope: Optional[str] = None
+    parameters_json: Dict[str, Any] = {}
+
+
+class SecurityJobResponse(BaseModel):
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    job_type: str
+    status: str
+    cancel_requested: bool = False
+    requested_by: Optional[str] = None
+    target_scope: Optional[str] = None
+    parameters_json: Optional[Dict[str, Any]] = None
+    result_json: Optional[Dict[str, Any]] = None
+    logs_json: List[Dict[str, Any]] = []
+    error_message: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SecurityJobSummaryResponse(BaseModel):
+    total_jobs: int
+    queued_jobs: int
+    running_jobs: int
+    failed_jobs: int
+    completed_jobs: int
 
 
 class UnknownDeviceResponse(BaseModel):
@@ -1370,6 +1499,415 @@ def _start_endpoint_status_worker():
     _ENDPOINT_STATUS_STOP.clear()
     _ENDPOINT_STATUS_THREAD = threading.Thread(target=_endpoint_status_worker, name="endpoint-status", daemon=True)
     _ENDPOINT_STATUS_THREAD.start()
+
+
+def _append_security_job_log(job: SecurityJob, *, level: str, message: str, data: Optional[Dict[str, Any]] = None) -> None:
+    logs = list(job.logs_json or [])
+    entry: Dict[str, Any] = {
+        "timestamp": datetime.utcnow().isoformat(),
+        "level": level,
+        "message": message,
+    }
+    if data:
+        entry["data"] = data
+    logs.append(entry)
+    job.logs_json = logs
+
+
+def _serialize_security_job(job: SecurityJob) -> SecurityJobResponse:
+    return SecurityJobResponse(
+        id=job.id,
+        created_at=job.created_at,
+        updated_at=job.updated_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        job_type=job.job_type,
+        status=job.status,
+        cancel_requested=bool(job.cancel_requested),
+        requested_by=job.requested_by,
+        target_scope=job.target_scope,
+        parameters_json=job.parameters_json or {},
+        result_json=job.result_json or None,
+        logs_json=job.logs_json or [],
+        error_message=job.error_message,
+    )
+
+
+def _flatten_security_job_csv_rows(job: SecurityJob) -> List[Dict[str, Any]]:
+    result = job.result_json if isinstance(job.result_json, dict) else {}
+    items = result.get("items") if isinstance(result.get("items"), list) else None
+    if items:
+        rows = []
+        for item in items:
+            if isinstance(item, dict):
+                row = {
+                    "job_id": job.id,
+                    "job_type": job.job_type,
+                    "status": job.status,
+                    "created_at": job.created_at.isoformat() if job.created_at else None,
+                    "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+                }
+                row.update(item)
+                rows.append(row)
+        if rows:
+            return rows
+
+    return [{
+        "job_id": job.id,
+        "job_type": job.job_type,
+        "status": job.status,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "started_at": job.started_at.isoformat() if job.started_at else None,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        "requested_by": job.requested_by,
+        "target_scope": job.target_scope,
+        "parameters_json": json.dumps(job.parameters_json or {}, ensure_ascii=False),
+        "result_json": json.dumps(job.result_json or {}, ensure_ascii=False),
+        "error_message": job.error_message,
+    }]
+
+
+def _build_security_job_csv(job: SecurityJob) -> str:
+    rows = _flatten_security_job_csv_rows(job)
+    headers: List[str] = []
+    for row in rows:
+        for key in row.keys():
+            if key not in headers:
+                headers.append(key)
+
+    buffer = StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=headers)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    return buffer.getvalue()
+
+
+def _build_security_jobs_history_csv(jobs: List[SecurityJob]) -> str:
+    buffer = StringIO()
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=[
+            "job_id",
+            "job_type",
+            "status",
+            "cancel_requested",
+            "requested_by",
+            "target_scope",
+            "created_at",
+            "started_at",
+            "completed_at",
+            "error_message",
+            "result_summary",
+            "row_type",
+            "asset_name",
+            "hostname",
+            "serial_number",
+            "severity",
+            "title",
+            "status_label",
+            "observed_at",
+            "raw",
+        ],
+    )
+    writer.writeheader()
+    for job in jobs:
+        base_row = {
+            "job_id": job.id,
+            "job_type": job.job_type,
+            "status": job.status,
+            "cancel_requested": bool(job.cancel_requested),
+            "requested_by": job.requested_by or "",
+            "target_scope": job.target_scope or "",
+            "created_at": job.created_at.isoformat() if job.created_at else "",
+            "started_at": job.started_at.isoformat() if job.started_at else "",
+            "completed_at": job.completed_at.isoformat() if job.completed_at else "",
+            "error_message": job.error_message or "",
+            "result_summary": json.dumps(job.result_json or {}, ensure_ascii=False),
+        }
+        rows = _flatten_security_job_csv_rows(job)
+        if not rows:
+            writer.writerow({
+                **base_row,
+                "row_type": "job",
+                "asset_name": "",
+                "hostname": "",
+                "serial_number": "",
+                "severity": "",
+                "title": "",
+                "status_label": "",
+                "observed_at": "",
+                "raw": "",
+            })
+            continue
+        for row in rows:
+            writer.writerow({**base_row, **row})
+    return buffer.getvalue()
+
+
+class SecurityJobCancelledError(Exception):
+    pass
+
+
+def _is_security_job_cancel_requested(db: Session, job_id: int) -> bool:
+    current_job = db.query(SecurityJob).filter(SecurityJob.id == job_id).first()
+    return bool(current_job and current_job.cancel_requested)
+
+
+def _raise_if_security_job_cancel_requested(db: Session, job: SecurityJob, checkpoint: str) -> None:
+    if _is_security_job_cancel_requested(db, job.id):
+        raise SecurityJobCancelledError(f"Arrêt demandé pendant {checkpoint}")
+
+
+def _validate_security_job_payload(payload: SecurityJobCreate) -> Dict[str, Any]:
+    job_type = (payload.job_type or "").strip()
+    if job_type not in SECURITY_JOB_TYPE_CATALOG:
+        raise HTTPException(status_code=400, detail=f"job_type invalide: {job_type}")
+
+    catalog = SECURITY_JOB_TYPE_CATALOG[job_type]
+    merged_parameters = dict(catalog.get("default_parameters") or {})
+    merged_parameters.update(payload.parameters_json or {})
+
+    if job_type == "unknown_devices_snapshot":
+        active_minutes = int(merged_parameters.get("active_minutes", 15))
+        if active_minutes < 1 or active_minutes > 240:
+            raise HTTPException(status_code=400, detail="active_minutes doit être entre 1 et 240")
+        merged_parameters["active_minutes"] = active_minutes
+
+    if job_type == "network_exposure_review":
+        merged_parameters["replace_existing"] = bool(merged_parameters.get("replace_existing", True))
+
+    target_scope = (payload.target_scope or "").strip() or None
+    if target_scope and not catalog.get("supports_target_scope"):
+        raise HTTPException(status_code=400, detail="Ce type de job ne supporte pas target_scope")
+
+    return {
+        "job_type": job_type,
+        "requested_by": (payload.requested_by or "").strip() or None,
+        "target_scope": target_scope,
+        "parameters_json": merged_parameters,
+    }
+
+
+def _create_security_job_record(db: Session, validated: Dict[str, Any], *, source_job_id: Optional[int] = None) -> SecurityJob:
+    job = SecurityJob(
+        job_type=validated["job_type"],
+        status="queued",
+        cancel_requested=False,
+        requested_by=validated["requested_by"],
+        target_scope=validated["target_scope"],
+        parameters_json=validated["parameters_json"],
+        logs_json=[],
+    )
+    log_data: Dict[str, Any] = {"job_type": job.job_type}
+    if source_job_id is not None:
+        log_data["source_job_id"] = source_job_id
+        _append_security_job_log(job, level="info", message="Job relancé depuis l'historique", data=log_data)
+    else:
+        _append_security_job_log(job, level="info", message="Job mis en file d'attente", data=log_data)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def _security_scope_matches(hostname: Optional[str], serial_number: Optional[str], target_scope: Optional[str]) -> bool:
+    scope = (target_scope or "").strip().lower()
+    if not scope:
+        return True
+    hostname_value = (hostname or "").strip().lower()
+    serial_value = (serial_number or "").strip().lower()
+    return scope in hostname_value or scope in serial_value
+
+
+def _recalculate_security_findings_job(db: Session, job: SecurityJob) -> Dict[str, Any]:
+    posture_items = db.query(EndpointSecurityPosture).all()
+    for index, item in enumerate(posture_items):
+        if index % 10 == 0:
+            _raise_if_security_job_cancel_requested(db, job, "recalcul des constats")
+        _generate_findings_from_posture(item, db)
+    return {"processed": len(posture_items)}
+
+
+def _run_siem_rules_job(db: Session, job: SecurityJob) -> Dict[str, Any]:
+    serials = set()
+    serials.update([row.serial_number for row in db.query(EndpointSecurityPosture.serial_number).all() if row.serial_number])
+    serials.update([row.serial_number for row in db.query(NetworkTelemetry.serial_number).all() if row.serial_number])
+
+    for index, serial in enumerate(serials):
+        if index % 10 == 0:
+            _raise_if_security_job_cancel_requested(db, job, "rejeu des règles SIEM")
+        _run_siem_rules_for_host(db, serial)
+
+    db.commit()
+    open_alerts = db.query(SiemAlert).filter(SiemAlert.status.in_(["Nouvelle", "En cours"])).count()
+    return {"processed_hosts": len(serials), "open_alerts": open_alerts}
+
+
+def _snapshot_unknown_devices_job(db: Session, job: SecurityJob, *, active_minutes: int) -> Dict[str, Any]:
+    _raise_if_security_job_cancel_requested(db, job, "préparation du snapshot")
+    threshold = datetime.utcnow() - timedelta(minutes=active_minutes)
+    rows = db.query(EndpointSecurityPosture).filter(
+        EndpointSecurityPosture.asset_id.is_(None),
+        EndpointSecurityPosture.last_seen >= threshold,
+    ).order_by(EndpointSecurityPosture.last_seen.desc()).all()
+
+    items = [
+        {
+            "hostname": row.hostname,
+            "serial_number": row.serial_number,
+            "ip_address": row.ip_address,
+            "source": row.source,
+            "first_seen": row.first_seen.isoformat() if row.first_seen else None,
+            "last_seen": row.last_seen.isoformat() if row.last_seen else None,
+        }
+        for row in rows
+    ]
+    return {"active_minutes": active_minutes, "unknown_devices": len(items), "items": items}
+
+
+def _network_exposure_review_job(db: Session, job: SecurityJob, *, target_scope: Optional[str], replace_existing: bool) -> Dict[str, Any]:
+    if replace_existing:
+        query = db.query(SecurityFinding).filter(
+            SecurityFinding.source == "Défense automatique",
+            SecurityFinding.title.like("Surface d'exposition réseau:%"),
+        )
+        if target_scope:
+            query = query.filter(func.lower(SecurityFinding.target_name).like(f"%{target_scope.lower()}%"))
+        query.delete(synchronize_session=False)
+        db.commit()
+
+    reviewed_hosts = 0
+    flagged_hosts = 0
+    findings_created = 0
+    findings_payload = []
+    sensitive_ports = {21, 22, 23, 25, 53, 110, 135, 139, 143, 389, 445, 1433, 1521, 3306, 3389, 5432, 5900, 6379, 8080}
+
+    rows = db.query(NetworkTelemetry).order_by(NetworkTelemetry.last_seen.desc()).all()
+    for index, row in enumerate(rows):
+        if index % 10 == 0:
+            _raise_if_security_job_cancel_requested(db, job, "revue d'exposition réseau")
+        if not _security_scope_matches(row.hostname, row.serial_number, target_scope):
+            continue
+
+        reviewed_hosts += 1
+        open_ports = sorted({int(port) for port in (row.open_ports_json or []) if isinstance(port, int) or str(port).isdigit()})
+        matched_sensitive = [port for port in open_ports if port in sensitive_ports]
+        risky_combo = 3389 in open_ports and 445 in open_ports
+
+        if not matched_sensitive and not risky_combo:
+            continue
+
+        severity = "Critique" if risky_combo else "Élevée"
+        description = (
+            f"Les ports sensibles suivants sont exposés: {', '.join(str(port) for port in matched_sensitive)}."
+            if matched_sensitive else
+            "Une combinaison de ports sensibles a été détectée."
+        )
+        db.add(SecurityFinding(
+            title=f"Surface d'exposition réseau: {row.hostname}",
+            description=description,
+            severity=severity,
+            status="Ouverte",
+            target_type="LAN" if row.asset_id is None else "Serveur",
+            target_name=row.hostname,
+            source="Défense automatique",
+            recommendation="Vérifiez la nécessité de ces ports, restreignez l'exposition et documentez la surface réseau autorisée.",
+            asset_id=row.asset_id,
+        ))
+        flagged_hosts += 1
+        findings_created += 1
+        findings_payload.append({
+            "hostname": row.hostname,
+            "serial_number": row.serial_number,
+            "open_ports": open_ports,
+            "matched_sensitive_ports": matched_sensitive,
+            "severity": severity,
+        })
+
+    db.commit()
+    return {
+        "reviewed_hosts": reviewed_hosts,
+        "flagged_hosts": flagged_hosts,
+        "findings_created": findings_created,
+        "items": findings_payload,
+    }
+
+
+def _execute_security_job(db: Session, job: SecurityJob) -> Dict[str, Any]:
+    parameters = job.parameters_json if isinstance(job.parameters_json, dict) else {}
+    if job.job_type == "security_recalculate":
+        return _recalculate_security_findings_job(db, job)
+    if job.job_type == "siem_rules_replay":
+        return _run_siem_rules_job(db, job)
+    if job.job_type == "unknown_devices_snapshot":
+        return _snapshot_unknown_devices_job(db, job, active_minutes=int(parameters.get("active_minutes", 15)))
+    if job.job_type == "network_exposure_review":
+        return _network_exposure_review_job(
+            db,
+            job,
+            target_scope=job.target_scope,
+            replace_existing=bool(parameters.get("replace_existing", True)),
+        )
+    raise RuntimeError(f"Type de job non géré: {job.job_type}")
+
+
+def _security_job_worker() -> None:
+    while not _SECURITY_JOB_STOP.is_set():
+        db = SessionLocal()
+        try:
+            job = db.query(SecurityJob).filter(SecurityJob.status == "queued").order_by(SecurityJob.created_at.asc(), SecurityJob.id.asc()).first()
+            if not job:
+                _SECURITY_JOB_STOP.wait(timeout=3)
+                continue
+
+            job.status = "running"
+            job.started_at = datetime.utcnow()
+            job.completed_at = None
+            job.error_message = None
+            job.cancel_requested = False
+            _append_security_job_log(job, level="info", message="Job démarré")
+            db.commit()
+            db.refresh(job)
+
+            try:
+                result = _execute_security_job(db, job)
+                if _is_security_job_cancel_requested(db, job.id):
+                    raise SecurityJobCancelledError("Arrêt demandé avant finalisation")
+                job.result_json = result
+                job.status = "completed"
+                job.completed_at = datetime.utcnow()
+                _append_security_job_log(job, level="info", message="Job terminé", data=result)
+                db.commit()
+            except SecurityJobCancelledError as exc:
+                db.rollback()
+                cancelled_job = db.query(SecurityJob).filter(SecurityJob.id == job.id).first()
+                if cancelled_job:
+                    cancelled_job.status = "cancelled"
+                    cancelled_job.completed_at = datetime.utcnow()
+                    cancelled_job.error_message = None
+                    _append_security_job_log(cancelled_job, level="warning", message="Job arrêté à la demande", data={"detail": str(exc)})
+                    db.commit()
+            except Exception as exc:
+                db.rollback()
+                failed_job = db.query(SecurityJob).filter(SecurityJob.id == job.id).first()
+                if failed_job:
+                    failed_job.status = "failed"
+                    failed_job.completed_at = datetime.utcnow()
+                    failed_job.error_message = str(exc)[:500]
+                    _append_security_job_log(failed_job, level="error", message="Job en échec", data={"error": str(exc)[:500]})
+                    db.commit()
+        finally:
+            db.close()
+
+
+def _start_security_job_worker() -> None:
+    global _SECURITY_JOB_THREAD
+    if _SECURITY_JOB_THREAD and _SECURITY_JOB_THREAD.is_alive():
+        return
+    _SECURITY_JOB_STOP.clear()
+    _SECURITY_JOB_THREAD = threading.Thread(target=_security_job_worker, name="security-job-worker", daemon=True)
+    _SECURITY_JOB_THREAD.start()
 
 
 @app.get("/ad/status")
@@ -2762,6 +3300,165 @@ def get_security_summary(db: Session = Depends(get_db)):
     )
 
 
+@app.get("/security/jobs/catalog", response_model=List[SecurityJobCatalogItem])
+def get_security_jobs_catalog():
+    return [
+        SecurityJobCatalogItem(
+            job_type=job_type,
+            label=item["label"],
+            description=item["description"],
+            supports_target_scope=bool(item.get("supports_target_scope")),
+            default_parameters=item.get("default_parameters") or {},
+        )
+        for job_type, item in SECURITY_JOB_TYPE_CATALOG.items()
+    ]
+
+
+@app.get("/security/jobs/summary", response_model=SecurityJobSummaryResponse)
+def get_security_jobs_summary(db: Session = Depends(get_db)):
+    total_jobs = db.query(SecurityJob).count()
+    queued_jobs = db.query(SecurityJob).filter(SecurityJob.status == "queued").count()
+    running_jobs = db.query(SecurityJob).filter(SecurityJob.status == "running").count()
+    failed_jobs = db.query(SecurityJob).filter(SecurityJob.status == "failed").count()
+    completed_jobs = db.query(SecurityJob).filter(SecurityJob.status == "completed").count()
+    return SecurityJobSummaryResponse(
+        total_jobs=total_jobs,
+        queued_jobs=queued_jobs,
+        running_jobs=running_jobs,
+        failed_jobs=failed_jobs,
+        completed_jobs=completed_jobs,
+    )
+
+
+@app.get("/security/jobs", response_model=List[SecurityJobResponse])
+def get_security_jobs(limit: int = 50, status: Optional[str] = None, db: Session = Depends(get_db)):
+    safe_limit = max(1, min(limit, 200))
+    query = db.query(SecurityJob)
+    if status:
+        normalized_status = status.strip().lower()
+        if normalized_status not in SECURITY_JOB_VALID_STATUS:
+            raise HTTPException(status_code=400, detail=f"Statut invalide: {status}")
+        query = query.filter(SecurityJob.status == normalized_status)
+    jobs = query.order_by(SecurityJob.created_at.desc(), SecurityJob.id.desc()).limit(safe_limit).all()
+    return [_serialize_security_job(job) for job in jobs]
+
+
+@app.get("/security/jobs/export")
+def export_security_jobs_history(
+    format: str = "json",
+    status: Optional[str] = None,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    safe_limit = max(1, min(limit, 2000))
+    query = db.query(SecurityJob)
+    if status:
+        normalized_status = status.strip().lower()
+        if normalized_status not in SECURITY_JOB_VALID_STATUS:
+            raise HTTPException(status_code=400, detail=f"Statut invalide: {status}")
+        query = query.filter(SecurityJob.status == normalized_status)
+    jobs = query.order_by(SecurityJob.created_at.desc(), SecurityJob.id.desc()).limit(safe_limit).all()
+
+    export_format = (format or "json").strip().lower()
+    if export_format == "json":
+        return {
+            "total": len(jobs),
+            "status_filter": status or None,
+            "jobs": [_serialize_security_job(job).dict() for job in jobs],
+        }
+    if export_format == "csv":
+        csv_content = _build_security_jobs_history_csv(jobs)
+        suffix = f"-{status.strip().lower()}" if status and status.strip() else ""
+        filename = f"security-jobs-history{suffix}.csv"
+        return Response(
+            content=csv_content,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    raise HTTPException(status_code=400, detail="format doit être 'json' ou 'csv'")
+
+
+@app.get("/security/jobs/{job_id}", response_model=SecurityJobResponse)
+def get_security_job(job_id: int, db: Session = Depends(get_db)):
+    job = db.query(SecurityJob).filter(SecurityJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job introuvable")
+    return _serialize_security_job(job)
+
+
+@app.post("/security/jobs", response_model=SecurityJobResponse)
+def create_security_job(payload: SecurityJobCreate, db: Session = Depends(get_db)):
+    validated = _validate_security_job_payload(payload)
+    job = _create_security_job_record(db, validated)
+    return _serialize_security_job(job)
+
+
+@app.post("/security/jobs/{job_id}/rerun", response_model=SecurityJobResponse)
+def rerun_security_job(job_id: int, db: Session = Depends(get_db)):
+    source_job = db.query(SecurityJob).filter(SecurityJob.id == job_id).first()
+    if not source_job:
+        raise HTTPException(status_code=404, detail="Job introuvable")
+
+    validated = _validate_security_job_payload(
+        SecurityJobCreate(
+            job_type=source_job.job_type,
+            requested_by=source_job.requested_by,
+            target_scope=source_job.target_scope,
+            parameters_json=source_job.parameters_json or {},
+        )
+    )
+    job = _create_security_job_record(db, validated, source_job_id=source_job.id)
+    return _serialize_security_job(job)
+
+
+@app.patch("/security/jobs/{job_id}/cancel", response_model=SecurityJobResponse)
+def cancel_security_job(job_id: int, db: Session = Depends(get_db)):
+    job = db.query(SecurityJob).filter(SecurityJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job introuvable")
+    if job.status == "queued":
+        job.status = "cancelled"
+        job.cancel_requested = True
+        job.completed_at = datetime.utcnow()
+        _append_security_job_log(job, level="warning", message="Job annulé avant exécution")
+        db.commit()
+        db.refresh(job)
+        return _serialize_security_job(job)
+    if job.status == "running":
+        if not job.cancel_requested:
+            job.cancel_requested = True
+            _append_security_job_log(job, level="warning", message="Demande d'arrêt enregistrée")
+            db.commit()
+            db.refresh(job)
+        return _serialize_security_job(job)
+    if job.status == "cancelled":
+        return _serialize_security_job(job)
+    raise HTTPException(status_code=409, detail="Seuls les jobs en file ou en cours peuvent recevoir une annulation")
+
+
+@app.get("/security/jobs/{job_id}/export")
+def export_security_job(job_id: int, format: str = "json", db: Session = Depends(get_db)):
+    job = db.query(SecurityJob).filter(SecurityJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job introuvable")
+
+    export_format = (format or "json").strip().lower()
+    if export_format == "json":
+        payload = _serialize_security_job(job).dict()
+        return payload
+    if export_format == "csv":
+        csv_content = _build_security_job_csv(job)
+        filename = f"security-job-{job.id}.csv"
+        return Response(
+            content=csv_content,
+            media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    raise HTTPException(status_code=400, detail="format doit être 'json' ou 'csv'")
+
+
 @app.get("/siem/events", response_model=List[SiemEventResponse])
 def get_siem_events(
     limit: int = 200,
@@ -3332,22 +4029,7 @@ def get_it_projects(db: Session = Depends(get_db)):
 @app.post("/it-projects", response_model=ITProjectResponse)
 def create_it_project(payload: ITProjectCreate, db: Session = Depends(get_db)):
     # Cree un projet IT avec son etat, sa description et sa documentation.
-    valid_status = ["A faire", "En cours", "Termine"]
-    if payload.status not in valid_status:
-        raise HTTPException(status_code=400, detail=f"Statut invalide: {payload.status}. Valeurs acceptees: {valid_status}")
-
-    cleaned_steps = []
-    for step in payload.steps:
-        label = (step.label or "").strip()
-        if not label:
-            continue
-        if step.end_date < step.start_date:
-            raise HTTPException(status_code=400, detail=f"Etape '{label}': la date de fin doit etre >= a la date de debut")
-        cleaned_steps.append({
-            "label": label,
-            "start_date": step.start_date.isoformat(),
-            "end_date": step.end_date.isoformat(),
-        })
+    cleaned_steps = _validate_it_project_payload(payload)
 
     project = ITProject(
         title=payload.title.strip(),
@@ -3378,52 +4060,11 @@ def create_it_project(payload: ITProjectCreate, db: Session = Depends(get_db)):
 @app.put("/it-projects/{project_id}", response_model=ITProjectResponse)
 def update_it_project(project_id: int, payload: ITProjectCreate, db: Session = Depends(get_db)):
     # Met a jour un projet IT existant.
-    valid_status = ["A faire", "En cours", "Termine"]
-    if payload.status not in valid_status:
-        raise HTTPException(status_code=400, detail=f"Statut invalide: {payload.status}. Valeurs acceptees: {valid_status}")
-
     project = db.query(ITProject).filter(ITProject.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Projet IT non trouve")
 
-    cleaned_steps = []
-    for step in payload.steps:
-        label = (step.label or "").strip()
-        if not label:
-            continue
-        if step.end_date < step.start_date:
-            raise HTTPException(status_code=400, detail=f"Etape '{label}': la date de fin doit etre >= a la date de debut")
-        cleaned_steps.append({
-            "label": label,
-            "start_date": step.start_date.isoformat(),
-            "end_date": step.end_date.isoformat(),
-        })
-
-    # Conserve l'historique des etapes existantes: les nouvelles etapes (ou etapes modifiees)
-    # avec le meme libelle remplacent l'ancienne version, les autres restent intactes.
-    existing_steps = []
-    for step in (project.steps_json or []):
-        if not isinstance(step, dict):
-            continue
-        label = (step.get("label") or "").strip()
-        start_date = step.get("start_date")
-        end_date = step.get("end_date")
-        if not label or not start_date or not end_date:
-            continue
-        existing_steps.append({
-            "label": label,
-            "start_date": start_date,
-            "end_date": end_date,
-        })
-
-    existing_by_label = {item["label"].lower(): item for item in existing_steps}
-    for item in cleaned_steps:
-        existing_by_label[item["label"].lower()] = item
-
-    merged_steps = sorted(
-        existing_by_label.values(),
-        key=lambda item: (item.get("start_date") or "", item.get("label") or ""),
-    )
+    cleaned_steps = _validate_it_project_payload(payload)
 
     project.title = payload.title.strip()
     project.status = payload.status
@@ -3431,7 +4072,7 @@ def update_it_project(project_id: int, payload: ITProjectCreate, db: Session = D
     project.documentation = (payload.documentation or "").strip() or None
     project.owner = (payload.owner or "").strip() or None
     project.due_date = payload.due_date
-    project.steps_json = merged_steps
+    project.steps_json = cleaned_steps
 
     db.commit()
     db.refresh(project)
@@ -3443,7 +4084,7 @@ def update_it_project(project_id: int, payload: ITProjectCreate, db: Session = D
         documentation=project.documentation,
         owner=project.owner,
         due_date=project.due_date,
-        steps=merged_steps,
+        steps=cleaned_steps,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )

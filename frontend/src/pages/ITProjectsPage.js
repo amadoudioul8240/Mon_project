@@ -11,6 +11,7 @@ const statusColumns = [
 ];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const ALERT_WINDOW_DAYS = 7;
 const ganttColorByStatus = {
   'A faire': 'bg-slate-500',
   'En cours': 'bg-amber-500',
@@ -34,6 +35,22 @@ function addDays(dateValue, days) {
   return new Date(dateValue.getTime() + (days * DAY_MS));
 }
 
+function startOfDay(dateValue) {
+  const next = new Date(dateValue);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function endOfDay(dateValue) {
+  const next = new Date(dateValue);
+  next.setHours(23, 59, 59, 999);
+  return next;
+}
+
+function diffDays(fromDate, toDate) {
+  return Math.ceil((startOfDay(toDate) - startOfDay(fromDate)) / DAY_MS);
+}
+
 function formatDate(value) {
   const parsed = parseDateSafe(value);
   if (!parsed) return '-';
@@ -48,6 +65,93 @@ function formatTickLabel(dateValue, zoomKey) {
     return dateValue.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
   }
   return dateValue.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' });
+}
+
+function getProjectProgress(project, referenceDate = new Date()) {
+  if (project.status === 'Termine') return 100;
+
+  const datedSteps = (project.steps || [])
+    .map((step) => ({
+      start: parseDateSafe(step.start_date),
+      end: parseDateSafe(step.end_date),
+    }))
+    .filter((step) => step.start && step.end);
+
+  if (datedSteps.length === 0) {
+    return project.status === 'En cours' ? 50 : 0;
+  }
+
+  let completedWeight = 0;
+  for (const step of datedSteps) {
+    if (startOfDay(referenceDate) > endOfDay(step.end)) {
+      completedWeight += 1;
+    } else if (referenceDate >= startOfDay(step.start) && referenceDate <= endOfDay(step.end)) {
+      completedWeight += 0.5;
+    }
+  }
+
+  const rawProgress = Math.round((completedWeight / datedSteps.length) * 100);
+  if (project.status === 'En cours') return Math.max(rawProgress, 10);
+  return Math.min(rawProgress, 95);
+}
+
+function getProjectTimelineState(project, referenceDate = new Date()) {
+  const dueDate = parseDateSafe(project.due_date);
+  if (project.status === 'Termine') {
+    return {
+      label: 'Termine',
+      detail: 'Projet cloture',
+      tone: 'emerald',
+      isOverdue: false,
+      isDueSoon: false,
+    };
+  }
+
+  if (!dueDate) {
+    return {
+      label: 'Sans echeance',
+      detail: 'Aucune date cible definie',
+      tone: 'slate',
+      isOverdue: false,
+      isDueSoon: false,
+    };
+  }
+
+  const daysUntilDue = diffDays(referenceDate, dueDate);
+  if (daysUntilDue < 0) {
+    return {
+      label: 'En retard',
+      detail: `${Math.abs(daysUntilDue)} jour(s) de retard`,
+      tone: 'red',
+      isOverdue: true,
+      isDueSoon: false,
+    };
+  }
+
+  if (daysUntilDue <= ALERT_WINDOW_DAYS) {
+    return {
+      label: 'Echeance proche',
+      detail: `J-${daysUntilDue}`,
+      tone: 'amber',
+      isOverdue: false,
+      isDueSoon: true,
+    };
+  }
+
+  return {
+    label: 'Dans les temps',
+    detail: `${daysUntilDue} jour(s) restants`,
+    tone: 'emerald',
+    isOverdue: false,
+    isDueSoon: false,
+  };
+}
+
+function getTimelineBadgeClasses(tone) {
+  if (tone === 'red') return 'bg-red-100 text-red-700';
+  if (tone === 'amber') return 'bg-amber-100 text-amber-700';
+  if (tone === 'emerald') return 'bg-emerald-100 text-emerald-700';
+  return 'bg-slate-100 text-slate-700';
 }
 
 function parseInlineDocColors(text, keyPrefix) {
@@ -180,17 +284,26 @@ export default function ITProjectsPage() {
     });
   }, [projects, search]);
 
+  const enrichedProjects = useMemo(() => {
+    const now = new Date();
+    return filteredProjects.map((project) => ({
+      ...project,
+      progress: getProjectProgress(project, now),
+      timelineState: getProjectTimelineState(project, now),
+    }));
+  }, [filteredProjects]);
+
   const groupedProjects = useMemo(() => {
     const grouped = { 'A faire': [], 'En cours': [], Termine: [] };
-    for (const project of filteredProjects) {
+    for (const project of enrichedProjects) {
       const key = grouped[project.status] ? project.status : 'A faire';
       grouped[key].push(project);
     }
     return grouped;
-  }, [filteredProjects]);
+  }, [enrichedProjects]);
 
   const ganttItems = useMemo(() => {
-    return filteredProjects
+    return enrichedProjects
       .map((project) => {
         const datedSteps = (project.steps || [])
           .map((step) => ({
@@ -230,7 +343,7 @@ export default function ITProjectsPage() {
       })
       .filter(Boolean)
       .sort((a, b) => a.start - b.start);
-  }, [filteredProjects]);
+  }, [enrichedProjects]);
 
   const ganttBounds = useMemo(() => {
     if (ganttItems.length === 0) return null;
@@ -262,11 +375,14 @@ export default function ITProjectsPage() {
   }, [ganttBounds, zoomConfig]);
 
   const stats = useMemo(() => {
+    const now = new Date();
     const total = projects.length;
     const todo = projects.filter((p) => p.status === 'A faire').length;
     const inProgress = projects.filter((p) => p.status === 'En cours').length;
     const done = projects.filter((p) => p.status === 'Termine').length;
-    return { total, todo, inProgress, done };
+    const overdue = projects.filter((p) => getProjectTimelineState(p, now).isOverdue).length;
+    const dueSoon = projects.filter((p) => getProjectTimelineState(p, now).isDueSoon).length;
+    return { total, todo, inProgress, done, overdue, dueSoon };
   }, [projects]);
 
   const handleChange = (e) => {
@@ -471,7 +587,7 @@ export default function ITProjectsPage() {
         <p className="text-gray-600">Centralise les projets avec statut, description detaillee et documentation.</p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <div className="bg-white rounded shadow p-4 border-l-4 border-l-slate-500">
           <div className="text-sm text-gray-500">Total projets</div>
           <div className="text-2xl font-bold">{stats.total}</div>
@@ -487,6 +603,14 @@ export default function ITProjectsPage() {
         <div className="bg-white rounded shadow p-4 border-l-4 border-l-emerald-500">
           <div className="text-sm text-gray-500">Termines</div>
           <div className="text-2xl font-bold text-emerald-700">{stats.done}</div>
+        </div>
+        <div className="bg-white rounded shadow p-4 border-l-4 border-l-red-500">
+          <div className="text-sm text-gray-500">En retard</div>
+          <div className="text-2xl font-bold text-red-700">{stats.overdue}</div>
+        </div>
+        <div className="bg-white rounded shadow p-4 border-l-4 border-l-amber-500">
+          <div className="text-sm text-gray-500">Echeance proche</div>
+          <div className="text-2xl font-bold text-amber-700">{stats.dueSoon}</div>
         </div>
       </div>
 
@@ -783,10 +907,28 @@ export default function ITProjectsPage() {
             <div className="space-y-3">
               {(groupedProjects[column.key] || []).map((project) => (
                 <article key={project.id} className="border rounded p-3 bg-gray-50 space-y-2">
-                  <div className="font-semibold">{project.title}</div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="font-semibold">{project.title}</div>
+                    <span className={`shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold ${getTimelineBadgeClasses(project.timelineState.tone)}`}>
+                      {project.timelineState.label}
+                    </span>
+                  </div>
                   <div className="text-sm text-gray-700 whitespace-pre-wrap">{project.description}</div>
                   <div className="text-xs text-gray-600">
                     Responsable: {project.owner || '-'} | Echeance: {project.due_date || '-'}
+                  </div>
+                  <div className="space-y-1 rounded border bg-white p-2">
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span>Progression</span>
+                      <span className="font-semibold text-slate-800">{project.progress}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                      <div
+                        className={`h-full rounded-full ${project.status === 'Termine' ? 'bg-emerald-500' : project.status === 'En cours' ? 'bg-amber-500' : 'bg-slate-500'}`}
+                        style={{ width: `${project.progress}%` }}
+                      />
+                    </div>
+                    <div className="text-[11px] text-slate-500">{project.timelineState.detail}</div>
                   </div>
                   <div className="text-xs text-slate-700 bg-white border rounded p-2 space-y-1">
                     <strong>Documentation:</strong>

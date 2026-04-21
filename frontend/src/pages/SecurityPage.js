@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
+import { useNavigate } from 'react-router-dom';
 
 import { backendUrl } from '../config/api';
 
@@ -8,6 +9,7 @@ const statusOptions = ['Ouverte', 'En cours', 'Corrigée'];
 const targetOptions = ['LAN', 'Serveur', 'Poste client'];
 
 export default function SecurityPage() {
+  const navigate = useNavigate();
   const [summary, setSummary] = useState({
     total_findings: 0,
     critical_findings: 0,
@@ -172,6 +174,20 @@ export default function SecurityPage() {
       <div>
         <h1 className="text-2xl font-bold mb-2">Centre de sécurité</h1>
         <p className="text-gray-600">Gestion défensive des vulnérabilités et posture de sécurité des endpoints.</p>
+      </div>
+
+      <div className="rounded bg-white p-4 shadow flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <div className="text-sm font-semibold text-slate-800">Orchestrateur défensif</div>
+          <div className="text-sm text-slate-600">Lancez des jobs asynchrones de recalcul, snapshot et revue réseau depuis le Security Jobs Engine.</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => navigate('/securite/jobs')}
+          className="rounded bg-slate-800 px-4 py-2 text-white hover:bg-slate-900"
+        >
+          Ouvrir Security Jobs
+        </button>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

@@ -7,14 +7,14 @@ Mettre en place un deploiement domaine de l'agent Go avec:
 - verification du signer via thumbprint.
 
 Scripts fournis:
-- `agent-go/deploy/gpo_startup_install_allsigned.ps1`
-- `agent-go/deploy/gpo_startup_uninstall_allsigned.ps1`
-- `agent-go/deploy/sign_all.ps1`
+- `powershell/agent-go/deploy/gpo_startup_install_allsigned.ps1`
+- `powershell/agent-go/deploy/gpo_startup_uninstall_allsigned.ps1`
+- `powershell/agent-go/deploy/sign_all.ps1`
 
 ## 1. Preparer les artefacts signes
 
 ```powershell
-Set-Location D:\projet-dev\It-monutoring\agent-go
+Set-Location D:\projet-dev\It-monutoring\powershell\agent-go
 .\build_agent.ps1
 Set-Location .\deploy
 .\sign_all.ps1 -CertThumbprint '<THUMBPRINT>' -StoreLocation CurrentUser
@@ -25,6 +25,7 @@ Exemple: `\\contoso.local\SYSVOL\contoso.local\scripts\it-agent-go`
 
 Copier dans ce partage:
 - `it-agent.exe`
+- `it-auth-agent.exe`
 - `config.json`
 - `gpo_startup_install_allsigned.ps1`
 - `gpo_startup_uninstall_allsigned.ps1` (rollback)

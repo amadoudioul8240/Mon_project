@@ -340,3 +340,28 @@ class SiemAlert(Base):
     title = Column(String, nullable=False)
     description = Column(String, nullable=False)
     evidence_json = Column(JSON, nullable=True)
+
+
+class SecurityJob(Base):
+    # File de jobs défensifs asynchrones pour les contrôles de sécurité autorisés.
+    __tablename__ = "security_jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
+    started_at = Column(DateTime, nullable=True, index=True)
+    completed_at = Column(DateTime, nullable=True, index=True)
+    job_type = Column(String, nullable=False, index=True)
+    status = Column(
+        Enum("queued", "running", "completed", "failed", "cancelled", name="security_job_status_enum"),
+        nullable=False,
+        default="queued",
+        index=True,
+    )
+    cancel_requested = Column(Boolean, nullable=False, default=False, index=True)
+    requested_by = Column(String, nullable=True, index=True)
+    target_scope = Column(String, nullable=True, index=True)
+    parameters_json = Column(JSON, nullable=True)
+    result_json = Column(JSON, nullable=True)
+    logs_json = Column(JSON, nullable=True)
+    error_message = Column(String, nullable=True)

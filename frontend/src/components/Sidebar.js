@@ -46,6 +46,9 @@ const Sidebar = ({ isOpen, onClose }) => (
       <NavLink to="/securite" onClick={onClose} className={({ isActive }) => isActive ? 'rounded-xl bg-white/20 px-3 py-2 font-bold text-white shadow' : 'rounded-xl px-3 py-2 text-cyan-100/90 transition hover:bg-white/10 hover:text-white'}>
         Sécurité
       </NavLink>
+      <NavLink to="/securite/jobs" onClick={onClose} className={({ isActive }) => isActive ? 'rounded-xl bg-white/20 px-3 py-2 font-bold text-white shadow' : 'rounded-xl px-3 py-2 text-cyan-100/90 transition hover:bg-white/10 hover:text-white'}>
+        Security Jobs
+      </NavLink>
       <NavLink to="/supervision" onClick={onClose} className={({ isActive }) => isActive ? 'rounded-xl bg-white/20 px-3 py-2 font-bold text-white shadow' : 'rounded-xl px-3 py-2 text-cyan-100/90 transition hover:bg-white/10 hover:text-white'}>
         Supervision Ressources
       </NavLink>

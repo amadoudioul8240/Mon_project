@@ -1,4 +1,0 @@
-# One computer name per line
-# PC-IT-001
-# PC-IT-002
-# LAPTOP-1234

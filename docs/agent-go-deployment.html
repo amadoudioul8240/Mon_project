@@ -98,18 +98,26 @@
 
   <h2>2. Arborescence livree</h2>
   <pre>agent-go/
-  build_agent.ps1
-  make_package.ps1
   go.mod
   cmd/it-agent/main.go
   deploy/
     config.json
-    install_service.ps1
-    uninstall_service.ps1
-    sign_agent.ps1
-    deploy_bulk.ps1
-    gpo_startup_install.ps1
-    computers-example.txt</pre>
+    it-agent.exe
+
+powershell/
+  agent-go/
+    build_agent.ps1
+    make_package.ps1
+    deploy/
+      install_service.ps1
+      uninstall_service.ps1
+      sign_agent.ps1
+      sign_all.ps1
+      deploy_bulk.ps1
+      gpo_startup_install.ps1
+      gpo_startup_install_allsigned.ps1
+      gpo_startup_uninstall_allsigned.ps1
+      computers-example.txt</pre>
 
   <h2>3. Prerequis</h2>
   <h3>3.1 Poste de build</h3>
@@ -159,16 +167,16 @@
 
   <h2>5. Build du binaire</h2>
   <ol>
-    <li>Ouvrir PowerShell dans <code>agent-go</code></li>
+    <li>Ouvrir PowerShell dans <code>powershell/agent-go</code></li>
     <li>Lancer le script de build</li>
   </ol>
-  <pre>Set-Location D:\projet-dev\It-monutoring\agent-go
+  <pre>Set-Location D:\projet-dev\It-monutoring\powershell\agent-go
 .\build_agent.ps1</pre>
   <p>Resultat attendu: <code>agent-go/deploy/it-agent.exe</code></p>
 
   <h2>6. Signature du binaire (optionnel mais recommande)</h2>
-  <p>Script: <code>agent-go/deploy/sign_agent.ps1</code></p>
-  <pre>Set-Location D:\projet-dev\It-monutoring\agent-go\deploy
+  <p>Script: <code>powershell/agent-go/deploy/sign_agent.ps1</code></p>
+  <pre>Set-Location D:\projet-dev\It-monutoring\powershell\agent-go\deploy
 $cred = Get-Credential
 .\sign_agent.ps1 -PfxPath "C:\certs\codesign.pfx" -SigningCredential $cred</pre>
   <div class="warn">
@@ -192,12 +200,12 @@ Get-Content C:\ProgramData\ITMonitoringAgent\agent.log -Tail 50</pre>
   <pre>.\uninstall_service.ps1</pre>
 
   <h2>8. Deploiement massif (remote)</h2>
-  <p>Script: <code>agent-go/deploy/deploy_bulk.ps1</code></p>
+  <p>Script: <code>powershell/agent-go/deploy/deploy_bulk.ps1</code></p>
   <ol>
     <li>Renseigner les machines dans <code>computers-example.txt</code> (1 machine par ligne)</li>
     <li>Lancer le deploiement depuis un poste admin</li>
   </ol>
-  <pre>Set-Location D:\projet-dev\It-monutoring\agent-go\deploy
+  <pre>Set-Location D:\projet-dev\It-monutoring\powershell\agent-go\deploy
 .\deploy_bulk.ps1 `
   -ComputerListPath .\computers-example.txt `
   -BackendUrl "http://srv-it:8000/assets/scan" `

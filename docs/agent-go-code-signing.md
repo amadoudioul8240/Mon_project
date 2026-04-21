@@ -1,12 +1,12 @@
 # Agent Go - Signature des scripts et binaire (AD CS)
 
 ## Objectif
-Signer les scripts PowerShell et le binaire `it-agent.exe` pour:
+Signer les scripts PowerShell et les binaires `it-agent.exe` et `it-auth-agent.exe` pour:
 - eviter les erreurs `ExecutionPolicy` en environnement enterprise,
 - garantir l'integrite des artefacts deployes.
 
 Le script fourni est:
-- `agent-go/deploy/sign_all.ps1`
+- `powershell/agent-go/deploy/sign_all.ps1`
 
 ## 1. Prerequis
 - Un certificat `Code Signing` avec cle privee dans:
@@ -33,10 +33,10 @@ Get-ChildItem Cert:\LocalMachine\My |
 
 ## 3. Signer tous les artefacts
 
-Depuis le dossier `agent-go/deploy`:
+Depuis le dossier `powershell/agent-go/deploy`:
 
 ```powershell
-Set-Location D:\projet-dev\It-monutoring\agent-go\deploy
+Set-Location D:\projet-dev\It-monutoring\powershell\agent-go\deploy
 .\sign_all.ps1 -CertThumbprint '<THUMBPRINT>' -StoreLocation CurrentUser
 ```
 
@@ -50,7 +50,8 @@ Si certificat en magasin machine:
 
 ```powershell
 Get-AuthenticodeSignature .\install_service.ps1 | Format-List Status, StatusMessage, SignerCertificate
-Get-AuthenticodeSignature .\it-agent.exe | Format-List Status, StatusMessage, SignerCertificate
+Get-AuthenticodeSignature D:\projet-dev\It-monutoring\agent-go\deploy\it-agent.exe | Format-List Status, StatusMessage, SignerCertificate
+Get-AuthenticodeSignature D:\projet-dev\It-monutoring\agent-go\deploy\it-auth-agent.exe | Format-List Status, StatusMessage, SignerCertificate
 ```
 
 ## 5. Politique d'execution recommandee
@@ -67,7 +68,7 @@ En entreprise, deploiement via GPO recommande:
 ## 6. Sequence de build recommandee
 
 ```powershell
-Set-Location D:\projet-dev\It-monutoring\agent-go
+Set-Location D:\projet-dev\It-monutoring\powershell\agent-go
 .\build_agent.ps1
 Set-Location .\deploy
 .\sign_all.ps1 -CertThumbprint '<THUMBPRINT>' -StoreLocation CurrentUser

@@ -9,6 +9,7 @@ import UsersPage from './pages/UsersPage';
 import LocationsPage from './pages/LocationsPage';
 import IncidentsPage from './pages/IncidentsPage';
 import SecurityPage from './pages/SecurityPage';
+import SecurityJobsPage from './pages/SecurityJobsPage';
 import CVEWatchPage from './pages/CVEWatchPage';
 import ResourcesPage from './pages/ResourcesPage';
 import NetworkPortsLogsPage from './pages/NetworkPortsLogsPage';
@@ -54,6 +55,7 @@ function App() {
             <Route path="/bureaux" element={<LocationsPage />} />
             <Route path="/incidents" element={<IncidentsPage />} />
             <Route path="/securite" element={<SecurityPage />} />
+            <Route path="/securite/jobs" element={<SecurityJobsPage />} />
             <Route path="/veille-cve" element={<CVEWatchPage />} />
             <Route path="/supervision" element={<ResourcesPage />} />
             <Route path="/ports-logs" element={<NetworkPortsLogsPage />} />
